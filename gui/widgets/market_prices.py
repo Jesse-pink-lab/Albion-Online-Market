@@ -6,7 +6,7 @@ import logging
 from typing import Any, Dict, List
 
 import requests
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
+    QProgressBar,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -33,6 +35,8 @@ class MarketPricesWidget(QWidget):
         self.logger = logging.getLogger(__name__)
         self.rows: List[Dict[str, Any]] = []
         self.summary: Dict[str, Dict[str, Any]] = {}
+        self.refresh_running = False
+        self.refresh_pending = False
         self.init_ui()
 
     # ------------------------------------------------------------------
@@ -73,7 +77,18 @@ class MarketPricesWidget(QWidget):
             self.quality_list.addItem(item)
         controls.addWidget(self.quality_list)
 
+        self.refresh_btn = QPushButton("Refresh Market Data")
+        self.refresh_btn.clicked.connect(self.on_refresh_clicked)
+        controls.addWidget(self.refresh_btn)
+
         layout.addLayout(controls)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        self.progress_label = QLabel()
+        layout.addWidget(self.progress_label)
 
         body = QHBoxLayout()
         self.table = QTableWidget(0, 10)
@@ -171,3 +186,73 @@ class MarketPricesWidget(QWidget):
             self.best_buy_label.setText(f"Best Buy: {bb['city']} @ {bb['price']}")
         if bs["city"] is not None:
             self.best_sell_label.setText(f"Best Sell: {bs['city']} @ {bs['price']}")
+
+    # ------------------------------------------------------------------
+    # Refresh handling
+    # ------------------------------------------------------------------
+    def collect_refresh_params(self) -> Dict[str, Any]:
+        cities = [i.text() for i in self.city_list.selectedItems()]
+        qualities = [int(i.text()) for i in self.quality_list.selectedItems()]
+        server = self.server_combo.currentText()
+        return {"server": server, "city": cities[0] if cities else "", "qualities": qualities}
+
+    def on_refresh_clicked(self) -> None:
+        if self.refresh_running:
+            self.refresh_pending = True
+            self.main_window.set_status("Refresh already running… queued")
+            self.logger.info("Refresh queued while busy")
+            return
+        self.start_refresh()
+
+    def start_refresh(self) -> None:
+        self.refresh_running = True
+        self.refresh_btn.setEnabled(False)
+        self.main_window.set_refresh_enabled(False)
+        params = self.collect_refresh_params()
+        self.logger.info("Market refresh requested: %s", params)
+
+        from gui.threads import RefreshWorker
+
+        self._thread = QThread(self)
+        self._worker = RefreshWorker(params)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self.on_refresh_progress)
+        self._worker.finished.connect(self.on_refresh_done)
+        self._worker.error.connect(self.on_refresh_error)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+        self._thread.start()
+
+    def on_refresh_progress(self, pct: int, msg: str) -> None:
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(pct)
+        self.progress_label.setText(msg)
+
+    def _refresh_cleanup(self) -> None:
+        self.refresh_running = False
+        self.refresh_btn.setEnabled(True)
+        self.main_window.set_refresh_enabled(True)
+        self.progress_bar.setVisible(False)
+        if self.refresh_pending:
+            self.refresh_pending = False
+            self.start_refresh()
+
+    def on_refresh_done(self, payload: Dict[str, Any]) -> None:
+        elapsed = payload.get("elapsed", 0)
+        self.main_window.set_status(f"Refresh done in {elapsed:.2f}s")
+        self.logger.info(
+            "Market refresh completed: items=%s records=%s elapsed=%.2fs",
+            payload.get("result", {}).get("items"),
+            payload.get("result", {}).get("records"),
+            elapsed,
+        )
+        self._refresh_cleanup()
+
+    def on_refresh_error(self, err: str) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.warning(self, "Refresh failed", err)
+        self.main_window.set_status("Refresh failed")
+        self._refresh_cleanup()

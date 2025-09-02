@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         refresh_action.setShortcut('F5')
         refresh_action.triggered.connect(self.refresh_data)
         tools_menu.addAction(refresh_action)
+        self.menu_refresh_action = refresh_action
         
         # Clear cache action
         clear_cache_action = QAction('&Clear Cache', self)
@@ -160,6 +161,7 @@ class MainWindow(QMainWindow):
         refresh_action.setToolTip('Refresh market data (F5)')
         refresh_action.triggered.connect(self.refresh_data)
         toolbar.addAction(refresh_action)
+        self.toolbar_refresh_action = refresh_action
         
         toolbar.addSeparator()
         
@@ -176,7 +178,7 @@ class MainWindow(QMainWindow):
         settings_action.setToolTip('Open settings')
         settings_action.triggered.connect(lambda: self.tab_widget.setCurrentWidget(self.settings_widget))
         toolbar.addAction(settings_action)
-    
+
     def init_status_bar(self):
         """Initialize the status bar."""
         self.status_bar = self.statusBar()
@@ -194,6 +196,18 @@ class MainWindow(QMainWindow):
         # Connection status
         self.connection_label = QLabel("🔴 Disconnected")
         self.status_bar.addPermanentWidget(self.connection_label)
+
+    def set_refresh_enabled(self, enabled: bool) -> None:
+        """Enable or disable refresh actions and progress bar."""
+        if hasattr(self, 'menu_refresh_action'):
+            self.menu_refresh_action.setEnabled(enabled)
+        if hasattr(self, 'toolbar_refresh_action'):
+            self.toolbar_refresh_action.setEnabled(enabled)
+        if enabled:
+            self.progress_bar.setVisible(False)
+        else:
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
     
     def init_system_tray(self):
         """Initialize system tray icon."""
@@ -304,27 +318,10 @@ class MainWindow(QMainWindow):
                 self.albion_proc = None
     
     def refresh_data(self):
-        """Refresh market data."""
+        """Refresh market data using the prices widget worker."""
         self.set_status("Refreshing market data...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
-        
-        try:
-            # Trigger refresh in all widgets
-            self.dashboard_widget.refresh_data()
-            self.flip_finder_widget.refresh_data()
-            self.crafting_optimizer_widget.refresh_data()
-            self.data_manager_widget.refresh_data()
-            
-            self.set_status("Data refreshed successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Data refresh failed: {e}")
-            self.show_error("Refresh Error", f"Failed to refresh data:\n{e}")
-            self.set_status("Data refresh failed")
-        
-        finally:
-            self.progress_bar.setVisible(False)
+        # Delegate to market prices widget which handles threading
+        self.market_prices_widget.on_refresh_clicked()
     
     def auto_refresh_data(self):
         """Automatically refresh data (called by timer)."""

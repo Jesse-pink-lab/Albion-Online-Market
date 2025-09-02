@@ -82,7 +82,7 @@ class DashboardWidget(QWidget):
         
         # Refresh button
         refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.clicked.connect(self.refresh_data)
+        refresh_btn.clicked.connect(self.main_window.refresh_data)
         header_layout.addWidget(refresh_btn)
         
         parent_layout.addWidget(header_frame)
