@@ -32,7 +32,11 @@ from gui.widgets.market_prices import MarketPricesWidget
 from engine.config import ConfigManager
 from datasources.aodp import AODPClient
 from store.db import DatabaseManager
-from services.albion_client import find_client, launch_client, capture_subproc_version
+from services.albion_client import (
+    find_client,
+    launch_client_with_fallback,
+    capture_subproc_version,
+)
 
 
 class MainWindow(QMainWindow):
@@ -226,7 +230,10 @@ class MainWindow(QMainWindow):
                 self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
             else:
                 try:
-                    self.albion_proc = launch_client(client_path, args=("--once",))
+                    flags = list(self.config.get("client", {}).get("flags", []))
+                    self.albion_proc = launch_client_with_fallback(
+                        client_path, flags
+                    )
                     capture_subproc_version(client_path)
                 except Exception as e:
                     self.logger.exception("Failed to initialize backend components: %s", e)
@@ -284,7 +291,8 @@ class MainWindow(QMainWindow):
                 self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
                 return
             try:
-                self.albion_proc = launch_client(client_path)
+                flags = list(self.config.get("client", {}).get("flags", []))
+                self.albion_proc = launch_client_with_fallback(client_path, flags)
             except Exception as e:
                 self.logger.exception("Failed to launch Albion Data Client: %s", e)
         else:
