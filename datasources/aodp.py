@@ -28,7 +28,9 @@ class AODPClient:
         
         # API configuration
         aodp_config = config.get('aodp', {})
-        self.base_url = aodp_config.get('base_url', 'https://west.albion-online-data.com/api/v2/stats')
+        self.base_url = aodp_config.get(
+            'base_url', 'https://www.albion-online-data.com/api/v2/stats'
+        )
         self.chunk_size = aodp_config.get('chunk_size', 40)
         self.rate_delay = aodp_config.get('rate_delay_seconds', 1)
         self.timeout = aodp_config.get('timeout_seconds', 30)

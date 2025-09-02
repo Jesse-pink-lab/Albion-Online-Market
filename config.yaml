@@ -36,7 +36,7 @@ crafting:
 
 # Albion Online Data Project API settings
 aodp:
-  base_url: "https://west.albion-online-data.com/api/v2/stats"
+  base_url: "https://www.albion-online-data.com/api/v2/stats"
   chunk_size: 40               # Items per API request
   rate_delay_seconds: 1        # Delay between requests
   timeout_seconds: 30          # Request timeout
