@@ -169,6 +169,9 @@ class ConfigManager:
                 'binary_path_win': None,
                 'binary_path_linux': None,
             },
+            'client': {
+                'flags': [],
+            },
             'app': {
                 'name': "Albion Trade Optimizer",
                 'version': "1.0.0",

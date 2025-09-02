@@ -96,26 +96,87 @@ def find_client(
     return None
 
 
-def launch_client(client_path: str, args: Sequence[str] = ()) -> subprocess.Popen:
+def _probe_version(client_path: str) -> None:
+    """Best-effort version probe."""
+    try:
+        subprocess.run(
+            [client_path, "-version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+            check=False,
+        )
+    except Exception as exc:  # pragma: no cover - diagnostic only
+        log.debug("Version probe failed: %r", exc)
+
+
+def _looks_like_flag_rejection(output: str) -> bool:
+    s = output.lower()
+    return ("flag provided but not defined" in s) or ("usage of" in s)
+
+
+def launch_client_with_fallback(
+    client_path: str, preferred_flags: Sequence[str] | tuple[str, ...] = ()
+) -> subprocess.Popen:
     valid, reason = is_valid_win64_exe(client_path)
     if not valid:
-        raise RuntimeError(f"Invalid albiondata-client.exe at {client_path}: {reason}")
-    cmd = [client_path, *args]
-    log.info("Launching albiondata-client: %s", cmd)
-    try:
-        proc = subprocess.Popen(cmd, close_fds=True)
-        log.info("Started PID=%s", proc.pid)
-        return proc
-    except OSError as exc:  # pragma: no cover - hard to trigger
-        if getattr(exc, "winerror", None) == 216:
-            msg = (
-                "Windows cannot run this albiondata-client.exe (WinError 216). "
-                "Install the official 64-bit Windows build and set its path in Settings."
+        raise RuntimeError(
+            f"Invalid albiondata-client.exe at {client_path}: {reason}"
+        )
+
+    _probe_version(client_path)
+
+    def _try(flags: Sequence[str]) -> subprocess.Popen:
+        cmd = [client_path, *flags]
+        log.info("Launching albiondata-client: %r", cmd)
+        try:
+            p = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
             )
-            log.error(msg)
-            raise RuntimeError(msg) from exc
-        log.exception("Failed to launch albiondata-client: %s", exc)
-        raise
+            try:
+                out = p.communicate(timeout=2)[0] or b""
+            except subprocess.TimeoutExpired:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+                return subprocess.Popen([client_path, *flags], close_fds=True)
+            else:
+                text = out.decode("utf-8", "replace")
+                if p.returncode and _looks_like_flag_rejection(text):
+                    log.warning(
+                        "Client rejected flags %s; output: %s",
+                        list(flags),
+                        text.strip(),
+                    )
+                    raise RuntimeError("Flags rejected")
+                if p.returncode == 0 and ("version" in text.lower()):
+                    return subprocess.Popen([client_path, *flags], close_fds=True)
+                return subprocess.Popen([client_path, *flags], close_fds=True)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            log.error("Initial try failed for flags %s: %r", list(flags), exc)
+            raise
+
+    if preferred_flags:
+        try:
+            proc = _try(preferred_flags)
+        except RuntimeError:
+            log.info("Retrying with NO flags due to flag rejection")
+            proc = _try(())
+        except Exception:
+            log.info("Retrying with NO flags due to launch error")
+            proc = _try(())
+    else:
+        proc = _try(())
+
+    log.info("Started PID=%s", getattr(proc, "pid", None))
+    return proc
+
+
+def launch_client(client_path: str, args: Sequence[str] = ()) -> subprocess.Popen:
+    return launch_client_with_fallback(client_path, args)
 
 
 def capture_subproc_version(client_path: str, timeout: float = 3.0) -> None:
