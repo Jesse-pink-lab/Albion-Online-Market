@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QDir
 from PySide6.QtGui import QIcon
 
-from ui.main_window import MainWindow
+from gui.main_window import MainWindow
 from store.db import DatabaseManager
 from engine.config import ConfigManager
 

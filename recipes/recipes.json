@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "version": 1
+  },
+  "recipes": {
+    "T4_SWORD": {
+      "item_id": "T4_SWORD",
+      "tier": 4,
+      "category": "weapon",
+      "subcategory": "sword",
+      "ingredients": [
+        {"item_id": "T4_METALBAR", "quantity": 16},
+        {"item_id": "T4_PLANKS", "quantity": 8}
+      ],
+      "station_type": "warrior_forge",
+      "station_fee": 0,
+      "crafting_time_seconds": 300,
+      "focus_cost": 0
+    },
+    "T4_METALBAR": {
+      "item_id": "T4_METALBAR",
+      "tier": 4,
+      "category": "refined_resource",
+      "subcategory": "metalbar",
+      "ingredients": [
+        {"item_id": "T4_ORE", "quantity": 2}
+      ],
+      "station_type": "smelter",
+      "station_fee": 0,
+      "crafting_time_seconds": 30,
+      "focus_cost": 0
+    },
+    "T4_PLANKS": {
+      "item_id": "T4_PLANKS",
+      "tier": 4,
+      "category": "refined_resource",
+      "subcategory": "planks",
+      "ingredients": [
+        {"item_id": "T4_WOOD", "quantity": 2}
+      ],
+      "station_type": "lumbermill",
+      "station_fee": 0,
+      "crafting_time_seconds": 30,
+      "focus_cost": 0
+    }
+  }
+}
