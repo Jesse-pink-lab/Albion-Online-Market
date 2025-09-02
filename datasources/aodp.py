@@ -389,3 +389,28 @@ class AODPClient:
         if self.session:
             self.session.close()
 
+
+def refresh_prices(server: str, city: str, qualities, on_progress=None, should_cancel=None):
+    """Refresh market prices from the AODP API.
+
+    This helper wraps :class:`AODPClient` to provide progress and
+    cancellation hooks used by background workers.
+    """
+
+    client = AODPClient({"aodp": {"server": server}})
+    items = ["T4_BAG"]  # placeholder list of items
+
+    total_items = len(items)
+    records = 0
+
+    for idx, item in enumerate(items, 1):
+        if should_cancel and should_cancel():
+            break
+        prices = client.get_current_prices([item], [city], qualities)
+        records += len(prices)
+        if on_progress:
+            pct = int(idx / total_items * 100)
+            on_progress(pct, f"Fetched {item}")
+
+    return {"items": total_items, "records": records}
+
