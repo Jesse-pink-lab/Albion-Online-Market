@@ -28,9 +28,12 @@ class DatabaseManager:
         # Get database path from config
         db_path = config.get('database', {}).get('path', 'data/albion_trade.db')
         self.db_path = Path(db_path)
-        
+
         # Ensure database directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Start with a fresh database to ensure schema matches models
+        if self.db_path.exists():
+            self.db_path.unlink()
         
         # Create database URL
         self.db_url = f"sqlite:///{self.db_path}"

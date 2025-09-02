@@ -65,7 +65,7 @@ class RecipeLoader:
         """Get ingredients for an item."""
         recipe = self.get_recipe(item_id)
         if recipe:
-            return recipe.ingredients
+            return recipe.get('ingredients', [])
         return []
 
 
@@ -195,8 +195,8 @@ class CraftingOptimizer:
         if not recipe:
             return {'cost': float('inf'), 'details': {}}
         
-        ingredients = recipe.ingredients
-        station_fee = recipe.station_fee if recipe.station_fee > 0 else self.default_station_fee
+        ingredients = recipe.get('ingredients', [])
+        station_fee = recipe.get('station_fee', 0) or self.default_station_fee
         
         # Calculate ingredient costs
         ingredient_costs = {}
@@ -301,7 +301,7 @@ class CraftingOptimizer:
             
             if 'ingredients' in details:
                 recipe = self.recipe_loader.get_recipe(item_id)
-                for ingredient in recipe.ingredients:
+                for ingredient in recipe.get('ingredients', []):
                     ingredient_id = ingredient['item_id']
                     ingredient_qty = ingredient['quantity'] * quantity  # Scale by target quantity
                     
