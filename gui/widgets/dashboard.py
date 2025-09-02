@@ -18,8 +18,8 @@ from PySide6.QtCore import Qt, QTimer, QThread, Signal
 from PySide6.QtGui import QFont, QPalette, QColor
 
 from engine.flips import FlipCalculator
-from engine.crafting import CraftingOptimizer, RecipeLoader
-from recipes.loader import RecipeLoader as RecipeLoaderClass
+from engine.crafting import CraftingOptimizer
+from recipes.loader import RecipeLoader
 
 
 class DashboardWidget(QWidget):
@@ -270,7 +270,7 @@ class DashboardWidget(QWidget):
             self.flip_calculator = FlipCalculator(config)
             
             # Initialize recipe loader and crafting optimizer
-            self.recipe_loader = RecipeLoaderClass()
+            self.recipe_loader = RecipeLoader()
             recipes = self.recipe_loader.load_recipes()
             
             if recipes:

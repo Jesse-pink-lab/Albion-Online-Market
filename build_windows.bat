@@ -50,7 +50,9 @@ REM Test the application
 echo Testing application...
 python main.py --test
 if errorlevel 1 (
-    echo WARNING: Application test failed. Continuing with build...
+    echo ERROR: Application test failed.
+    pause
+    exit /b 1
 )
 
 REM Run build script

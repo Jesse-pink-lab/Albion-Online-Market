@@ -33,23 +33,12 @@ from store.db import DatabaseManager
 class MainWindow(QMainWindow):
     """Main application window."""
 
-
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
         db_manager: Optional[DatabaseManager] = None,
     ) -> None:
-        """Initialize the main window.
-
-        Parameters
-        ----------
-        config:
-            Optional pre-loaded configuration dictionary. If not provided, the
-            configuration is loaded using :class:`ConfigManager`.
-        db_manager:
-            Optional database manager instance. If not provided, a new
-            :class:`DatabaseManager` is created using the configuration.
-        """
+        """Initialize the main window."""
 
         super().__init__()
 
@@ -60,36 +49,24 @@ class MainWindow(QMainWindow):
         self.config = config or self.config_manager.load_config()
         self.db_manager = db_manager or DatabaseManager(self.config)
 
-    
-    def __init__(self):
-        """Initialize the main window."""
-        super().__init__()
-        
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialize backend components
-        self.config_manager = ConfigManager()
-        self.config = self.config_manager.load_config()
-        self.db_manager = DatabaseManager(self.config)
-
         self.api_client = None
-        
+
         # Settings
         self.settings = QSettings('AlbionTradeOptimizer', 'AlbionTradeOptimizer')
-        
+
         # Initialize UI
         self.init_ui()
         self.init_menu_bar()
         self.init_tool_bar()
         self.init_status_bar()
         self.init_system_tray()
-        
+
         # Initialize backend
         self.init_backend()
-        
+
         # Restore window state
         self.restore_window_state()
-        
+
         # Start periodic updates
         self.init_timers()
     
