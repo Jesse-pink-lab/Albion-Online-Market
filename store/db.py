@@ -259,21 +259,19 @@ class DatabaseManager:
         finally:
             session.close()
     
-    def save_craft_plans(self, scan_id: int, plans_data: List[Dict[str, Any]]) -> int:
+    def save_craft_plans(self, plans_data: List[Dict[str, Any]]) -> int:
         """Save craft plans to database."""
         if not plans_data:
             return 0
-            
+
         session = self.get_session()
         try:
             plan_objects = []
             for plan_data in plans_data:
-                quantity = plan_data.get('quantity', 1)
                 plan = CraftPlan(
-                    scan_id=scan_id,
                     item_id=plan_data['item_id'],
-                    quantity=quantity,
-                    total_cost=plan_data['min_cost'] * quantity,
+                    quantity=plan_data.get('quantity', 1),
+                    total_cost=plan_data['min_cost'] * plan_data.get('quantity', 1),
                 )
                 plan_objects.append(plan)
 
@@ -282,30 +280,20 @@ class DatabaseManager:
 
             self.logger.info(f"Saved {len(plan_objects)} craft plans")
             return len(plan_objects)
-            
+
         except SQLAlchemyError as e:
             session.rollback()
             self.logger.error(f"Failed to save craft plans: {e}")
             raise
         finally:
             session.close()
-    
-    def get_craft_plan(self, item_id: str, scan_id: Optional[int] = None) -> Optional[CraftPlan]:
+
+    def get_craft_plan(self, item_id: str) -> Optional[CraftPlan]:
         """Get craft plan for an item."""
         session = self.get_session()
         try:
-            query = session.query(CraftPlan).filter(CraftPlan.item_id == item_id)
-            
-            if scan_id:
-                query = query.filter(CraftPlan.scan_id == scan_id)
-            else:
-                # Get latest scan
-                latest_scan = session.query(Scan).filter(Scan.status == 'completed').order_by(desc(Scan.finished_at_utc)).first()
-                if latest_scan:
-                    query = query.filter(CraftPlan.scan_id == latest_scan.id)
-            
-            return query.first()
-            
+            return session.query(CraftPlan).filter(CraftPlan.item_id == item_id).first()
+
         except SQLAlchemyError as e:
             self.logger.error(f"Failed to get craft plan: {e}")
             raise
@@ -490,16 +478,16 @@ class DatabaseManager:
             session.close()
     
     def clear_cache(self):
-        """Clear cached volatile data from the database."""
-        session = self.get_session()
+        """Clear volatile tables used for price/flip/scan caching."""
+        s = self.get_session()
         try:
-            session.query(Price).delete()
-            session.query(Flip).delete()
-            session.query(Scan).delete()
-            session.commit()
+            s.query(Price).delete()
+            s.query(Flip).delete()
+            s.query(Scan).delete()
+            s.commit()
             self.logger.info("Cache cleared")
         finally:
-            session.close()
+            s.close()
     
     def _get_database_size_mb(self) -> float:
         """Get database file size in MB."""
@@ -512,9 +500,9 @@ class DatabaseManager:
             return 0.0
     
     def close(self):
-        """Close database connections."""
-        if self.SessionLocal:
+        """Cleanly dispose sessions and engine."""
+        if getattr(self, "SessionLocal", None):
             self.SessionLocal.close_all()
-        if self.engine:
+        if getattr(self, "engine", None):
             self.engine.dispose()
 

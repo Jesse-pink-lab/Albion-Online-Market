@@ -14,7 +14,6 @@ a = Analysis(
     datas=[
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
-        ('recipes/items.txt', 'recipes'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
@@ -66,6 +65,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    version='version_info.txt',
-    icon='icon.ico' if Path('icon.ico').exists() else None,
+    versrsrc='version_info.txt',
+    icon=None,
 )

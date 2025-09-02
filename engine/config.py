@@ -5,7 +5,7 @@ Handles loading and managing application configuration from YAML files.
 """
 
 import logging
-import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -22,8 +22,8 @@ class ConfigManager:
         if config_path:
             self.config_path = Path(config_path)
         else:
-            # Default to config.yaml in project root
-            self.config_path = Path(__file__).parent.parent / "config.yaml"
+            base_dir = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))
+            self.config_path = base_dir / "config.yaml"
         
         self._config = None
     
@@ -32,13 +32,13 @@ class ConfigManager:
         try:
             if not self.config_path.exists():
                 self.logger.warning(f"Config file not found at {self.config_path}, using defaults")
-                return self._get_default_config()
+                return self.get_default_config()
             
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             
             # Merge with defaults to ensure all required keys exist
-            default_config = self._get_default_config()
+            default_config = self.get_default_config()
             merged_config = self._merge_configs(default_config, config)
             
             self._config = merged_config
@@ -49,7 +49,7 @@ class ConfigManager:
         except Exception as e:
             self.logger.error(f"Failed to load configuration: {e}")
             self.logger.info("Using default configuration")
-            return self._get_default_config()
+            return self.get_default_config()
     
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration, loading if necessary."""
