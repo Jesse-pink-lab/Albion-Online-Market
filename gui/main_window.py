@@ -8,6 +8,7 @@ import sys
 import logging
 import os
 import webbrowser
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -31,7 +32,7 @@ from gui.widgets.market_prices import MarketPricesWidget
 from engine.config import ConfigManager
 from datasources.aodp import AODPClient
 from store.db import DatabaseManager
-from services.uploader import UploaderProcess, UploaderConfig
+from services.albion_client import find_client, launch_client, capture_subproc_version
 
 
 class MainWindow(QMainWindow):
@@ -45,8 +46,7 @@ class MainWindow(QMainWindow):
         self.db_manager = db_manager or DatabaseManager(self.config)
         self.api_client = None
         self.settings = QSettings('AlbionTradeOptimizer', 'AlbionTradeOptimizer')
-        self.uploader: Optional[UploaderProcess] = None
-        self.uploader_log_lines: list[str] = []
+        self.albion_proc: Optional[subprocess.Popen] = None
         self.init_ui(); self.init_menu_bar(); self.init_tool_bar()
         self.init_status_bar(); self.init_system_tray()
         self.init_backend(); self.restore_window_state(); self.init_timers()
@@ -218,26 +218,16 @@ class MainWindow(QMainWindow):
             # Test API connection
             self.test_api_connection()
 
-            # Initialize uploader
-            def _on_uploader_log(line: str):
-                self.uploader_log_lines.append(line)
-                self.statusBar().showMessage(line[:200])
-
-            u_cfg_dict = self.config_manager.get_uploader_config()
-            u_cfg = UploaderConfig(**u_cfg_dict)
-            self.uploader = UploaderProcess(cfg=u_cfg, on_log=_on_uploader_log)
-            warns = self.uploader.preflight_warnings()
-            if warns:
-                self.statusBar().showMessage('; '.join(warns)[:200])
-                if os.environ.get('CI') != 'true':
-                    for w in warns:
-                        if 'Npcap' in w:
-                            if QMessageBox.question(self, 'Npcap Missing', 'Npcap not detected. Open download page?', QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-                                webbrowser.open('https://npcap.com')
-                        elif 'libpcap' in w:
-                            QMessageBox.warning(self, 'libpcap Missing', 'libpcap not detected. Try: `sudo apt-get install -y libpcap0.8`.')
-            if u_cfg.enabled and not warns and os.environ.get('CI') != 'true':
-                self.uploader.start()
+            project_dir = str(Path(__file__).resolve().parents[1])
+            client_path = find_client(self.config.get('albion_client_path'), project_dir)
+            if not client_path:
+                self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
+            else:
+                try:
+                    self.albion_proc = launch_client(client_path, args=("--once",))
+                    capture_subproc_version(client_path)
+                except Exception as e:
+                    self.logger.exception("Failed to initialize backend components: %s", e)
 
         except Exception as e:
             self.logger.error(f"Failed to initialize backend: {e}")
@@ -274,25 +264,23 @@ class MainWindow(QMainWindow):
             self.logger.error(f"API connection test error: {e}")
 
     def on_toggle_uploader(self, enabled: bool):
-        if not self.uploader:
-            return
-        self.uploader.cfg.enabled = enabled
+        project_dir = str(Path(__file__).resolve().parents[1])
         if enabled:
-            warns = self.uploader.preflight_warnings()
-            if warns:
-                self.statusBar().showMessage('; '.join(warns)[:200])
-                if os.environ.get('CI') != 'true':
-                    for w in warns:
-                        if 'Npcap' in w:
-                            if QMessageBox.question(self, 'Npcap Missing', 'Npcap not detected. Open download page?', QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
-                                webbrowser.open('https://npcap.com')
-                        elif 'libpcap' in w:
-                            QMessageBox.warning(self, 'libpcap Missing', 'libpcap not detected. Try: `sudo apt-get install -y libpcap0.8`.')
+            client_path = find_client(self.config.get('albion_client_path'), project_dir)
+            if not client_path:
+                self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
                 return
-            if os.environ.get('CI') != 'true':
-                self.uploader.start()
+            try:
+                self.albion_proc = launch_client(client_path)
+            except Exception as e:
+                self.logger.exception("Failed to launch Albion Data Client: %s", e)
         else:
-            self.uploader.stop()
+            if self.albion_proc and self.albion_proc.poll() is None:
+                try:
+                    self.albion_proc.terminate()
+                except Exception:
+                    pass
+                self.albion_proc = None
     
     def refresh_data(self):
         """Refresh market data."""
@@ -440,8 +428,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'refresh_timer'):
             self.refresh_timer.stop()
 
-        if hasattr(self, 'uploader') and self.uploader:
-            self.uploader.stop()
+        if getattr(self, 'albion_proc', None):
+            try:
+                if self.albion_proc.poll() is None:
+                    self.albion_proc.terminate()
+            except Exception:
+                pass
 
         self.logger.info("Application closing")
         event.accept()
