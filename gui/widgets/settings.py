@@ -255,7 +255,12 @@ class SettingsWidget(QWidget):
             freshness_config = self.config.get('freshness', {})
             self.max_age_spin.setValue(freshness_config.get('max_age_hours', 24))
             
-            self.log_level_combo.setCurrentText(app_config.get('log_level', 'INFO'))
+            logging_config = self.config.get('logging', {})
+            # Migration: handle old app.log_level
+            if 'log_level' in app_config and 'level' not in logging_config:
+                logging_config['level'] = app_config['log_level']
+                del app_config['log_level']
+            self.log_level_combo.setCurrentText(logging_config.get('level', 'INFO'))
 
             # Uploader settings
             uploader_cfg = self.main_window.config_manager.get_uploader_config()
@@ -300,7 +305,10 @@ class SettingsWidget(QWidget):
             if 'app' not in config:
                 config['app'] = {}
             config['app']['auto_refresh_minutes'] = self.auto_refresh_spin.value()
-            config['app']['log_level'] = self.log_level_combo.currentText()
+            config['app'].pop('log_level', None)
+            if 'logging' not in config:
+                config['logging'] = {}
+            config['logging']['level'] = self.log_level_combo.currentText()
             
             if 'freshness' not in config:
                 config['freshness'] = {}

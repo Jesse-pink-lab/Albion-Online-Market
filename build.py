@@ -63,6 +63,12 @@ a = Analysis(
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
         ('recipes/items.txt', 'recipes'),
+        ('README.md', '.'),
+        ('engine/config_schema.yaml', 'engine'),
+        ('bin/uploader-windows.exe', 'bin'),
+        ('bin/uploader-linux', 'bin'),
+        ('bin/uploader-macos', 'bin'),
+        ('bin/LICENSE.txt', 'bin'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
