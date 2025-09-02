@@ -32,6 +32,34 @@ from store.db import DatabaseManager
 
 class MainWindow(QMainWindow):
     """Main application window."""
+
+
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        db_manager: Optional[DatabaseManager] = None,
+    ) -> None:
+        """Initialize the main window.
+
+        Parameters
+        ----------
+        config:
+            Optional pre-loaded configuration dictionary. If not provided, the
+            configuration is loaded using :class:`ConfigManager`.
+        db_manager:
+            Optional database manager instance. If not provided, a new
+            :class:`DatabaseManager` is created using the configuration.
+        """
+
+        super().__init__()
+
+        self.logger = logging.getLogger(__name__)
+
+        # Initialize backend components
+        self.config_manager = ConfigManager()
+        self.config = config or self.config_manager.load_config()
+        self.db_manager = db_manager or DatabaseManager(self.config)
+
     
     def __init__(self):
         """Initialize the main window."""
@@ -43,6 +71,7 @@ class MainWindow(QMainWindow):
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load_config()
         self.db_manager = DatabaseManager(self.config)
+
         self.api_client = None
         
         # Settings
