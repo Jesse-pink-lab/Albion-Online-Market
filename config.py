@@ -262,6 +262,8 @@ class ConfigManager:
         aodp_config = self.get_aodp_config()
         if 'base_url' not in aodp_config:
             errors.append("AODP base_url not configured")
+        if 'server' not in aodp_config:
+            errors.append("AODP server not configured")
         
         return errors
 
