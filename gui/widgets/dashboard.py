@@ -20,6 +20,8 @@ from PySide6.QtGui import QFont, QPalette, QColor
 from engine.flips import FlipCalculator
 from engine.crafting import CraftingOptimizer
 from recipes.loader import RecipeLoader
+from core.signals import signals
+from utils.timefmt import to_utc, rel_age, fmt_tooltip
 
 
 class DashboardWidget(QWidget):
@@ -44,6 +46,7 @@ class DashboardWidget(QWidget):
         
         self.init_ui()
         self.init_backend()
+        signals.market_data_ready.connect(self.on_market_data_ready)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -199,6 +202,42 @@ class DashboardWidget(QWidget):
         card.subtitle_label = subtitle_label
         
         return card
+
+    # ------------------------------------------------------------------
+    # Signal handlers
+    # ------------------------------------------------------------------
+    def on_market_data_ready(self, summary: Dict[str, Any]) -> None:
+        """Update dashboard cards when new market data arrives."""
+
+        # Stop loading subtitles
+        for card in [self.flip_card, self.crafting_card, self.activity_card, self.freshness_card]:
+            if card.subtitle_label.text() == "Loading...":
+                card.subtitle_label.setText("")
+
+        best_flip = summary.get("best_flip")
+        if best_flip:
+            self.flip_card.value_label.setText(str(best_flip))
+        else:
+            self.flip_card.value_label.setText("No data")
+
+        best_craft = summary.get("best_craft")
+        if best_craft:
+            self.crafting_card.value_label.setText(str(best_craft))
+        else:
+            self.crafting_card.value_label.setText("No data")
+
+        activity = summary.get("activity")
+        if activity:
+            self.activity_card.value_label.setText(str(activity))
+        else:
+            self.activity_card.value_label.setText("No data")
+
+        last_update = summary.get("last_update_utc")
+        if last_update:
+            dt = to_utc(last_update)
+            self.last_update_label.setText(f"Last update: {rel_age(dt)}")
+            self.last_update_label.setToolTip(fmt_tooltip(dt))
+
     
     def create_opportunities_section(self, parent_layout):
         """Create opportunities overview section."""

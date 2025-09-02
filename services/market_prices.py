@@ -159,21 +159,46 @@ def fetch_prices(
         item_summary = summary.setdefault(
             item_id,
             {
-                "best_buy": {"city": None, "price": float("inf")},
-                "best_sell": {"city": None, "price": 0},
+                "sell_price_min": {"city": None, "price": float("inf"), "date": None},
+                "buy_price_max": {"city": None, "price": 0, "date": None},
             },
         )
-        if sell_min is not None and sell_min < item_summary["best_buy"]["price"]:
-            item_summary["best_buy"] = {"city": city, "price": sell_min}
-        if buy_max is not None and buy_max > item_summary["best_sell"]["price"]:
-            item_summary["best_sell"] = {"city": city, "price": buy_max}
+        if (
+            sell_min is not None
+            and sell_min < item_summary["sell_price_min"]["price"]
+        ):
+            item_summary["sell_price_min"] = {
+                "city": city,
+                "price": sell_min,
+                "date": last_sell,
+            }
+        if (
+            buy_max is not None
+            and buy_max > item_summary["buy_price_max"]["price"]
+        ):
+            item_summary["buy_price_max"] = {
+                "city": city,
+                "price": buy_max,
+                "date": last_buy,
+            }
 
-    # Clean up infinities
+    # Clean up and compute derived metrics
     for item_id, info in summary.items():
-        if info["best_buy"]["price"] == float("inf"):
-            info["best_buy"]["price"] = None
-        if info["best_sell"]["price"] == 0:
-            info["best_sell"]["price"] = None
+        if info["sell_price_min"]["price"] == float("inf"):
+            info["sell_price_min"]["price"] = None
+        if info["buy_price_max"]["price"] == 0:
+            info["buy_price_max"]["price"] = None
+
+        buy = info["sell_price_min"]["price"]
+        sell = info["buy_price_max"]["price"]
+        if buy is not None and sell is not None and buy > 0:
+            spread = sell - buy
+            roi = (spread / buy) * 100
+        else:
+            spread = None
+            roi = None
+        info["spread"] = spread
+        info["roi_percent"] = roi
 
     return rows, summary
 

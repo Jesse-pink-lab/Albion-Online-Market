@@ -1,5 +1,8 @@
 import requests
 from datetime import datetime
+import sys, pathlib
+
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 from services.market_prices import build_icon_url, fetch_prices
 
@@ -62,5 +65,8 @@ def test_fetch_prices_parses_and_summarises(monkeypatch):
             "https://render.albiononline.com/v1/item/T4_BAG"
         )
 
-    assert summary["T4_BAG"]["best_buy"] == {"city": "Martlock", "price": 950}
-    assert summary["T4_BAG"]["best_sell"] == {"city": "Martlock", "price": 950}
+    info = summary["T4_BAG"]
+    assert info["sell_price_min"]["city"] == "Martlock"
+    assert info["buy_price_max"]["city"] == "Martlock"
+    assert info["spread"] == 0
+    assert info["roi_percent"] == 0
