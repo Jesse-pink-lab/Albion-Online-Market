@@ -33,6 +33,7 @@ from store.db import DatabaseManager
 class MainWindow(QMainWindow):
     """Main application window."""
 
+
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
@@ -58,6 +59,19 @@ class MainWindow(QMainWindow):
         self.config_manager = ConfigManager()
         self.config = config or self.config_manager.load_config()
         self.db_manager = db_manager or DatabaseManager(self.config)
+
+    
+    def __init__(self):
+        """Initialize the main window."""
+        super().__init__()
+        
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize backend components
+        self.config_manager = ConfigManager()
+        self.config = self.config_manager.load_config()
+        self.db_manager = DatabaseManager(self.config)
+
         self.api_client = None
         
         # Settings
