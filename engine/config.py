@@ -5,11 +5,13 @@ Handles loading and managing application configuration from YAML files.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import yaml
+from platformdirs import user_config_dir
 
 
 class ConfigManager:
@@ -22,8 +24,9 @@ class ConfigManager:
         if config_path:
             self.config_path = Path(config_path)
         else:
-            base_dir = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))
-            self.config_path = base_dir / "config.yaml"
+            app_dir = Path(user_config_dir("AlbionTradeOptimizer", roaming=True))
+            os.makedirs(app_dir, exist_ok=True)
+            self.config_path = app_dir / "config.yaml"
         
         self._config = None
     
@@ -32,7 +35,8 @@ class ConfigManager:
         try:
             if not self.config_path.exists():
                 self.logger.warning(f"Config file not found at {self.config_path}, using defaults")
-                return self.get_default_config()
+                self._config = self.get_default_config()
+                return self._config
             
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
@@ -40,7 +44,8 @@ class ConfigManager:
             # Merge with defaults to ensure all required keys exist
             default_config = self.get_default_config()
             merged_config = self._merge_configs(default_config, config)
-            
+            merged_config = self._migrate_config(merged_config)
+
             self._config = merged_config
             self.logger.info(f"Configuration loaded from {self.config_path}")
             
@@ -101,11 +106,15 @@ class ConfigManager:
         save_path = Path(config_path) if config_path else self.config_path
         
         try:
-            with open(save_path, 'w', encoding='utf-8') as f:
+            tmp_path = save_path.with_suffix(save_path.suffix + ".tmp")
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 yaml.dump(self._config, f, default_flow_style=False, indent=2)
-            
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, save_path)
+
             self.logger.info(f"Configuration saved to {save_path}")
-            
+
         except Exception as e:
             self.logger.error(f"Failed to save configuration: {e}")
             raise
@@ -146,6 +155,7 @@ class ConfigManager:
             },
             'aodp': {
                 'base_url': "https://www.albion-online-data.com/api/v2/stats",
+                'server': 'europe',
                 'chunk_size': 40,
                 'rate_delay_seconds': 1,
                 'timeout_seconds': 30
@@ -186,14 +196,23 @@ class ConfigManager:
     def _merge_configs(self, default: Dict[str, Any], user: Dict[str, Any]) -> Dict[str, Any]:
         """Merge user configuration with defaults."""
         result = default.copy()
-        
+
         for key, value in user.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._merge_configs(result[key], value)
             else:
                 result[key] = value
-        
+
         return result
+
+    def _migrate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle legacy configuration keys."""
+        app_cfg = config.get('app', {})
+        logging_cfg = config.setdefault('logging', {})
+        if 'log_level' in app_cfg and 'level' not in logging_cfg:
+            logging_cfg['level'] = app_cfg['log_level']
+        app_cfg.pop('log_level', None)
+        return config
     
     def get_cities(self) -> List[str]:
         """Get list of supported cities."""

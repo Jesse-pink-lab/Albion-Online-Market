@@ -40,16 +40,24 @@ def npcap_installed() -> bool:
 
 
 def libpcap_present() -> bool:
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(["/usr/sbin/tcpdump", "-D"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            return result.returncode == 0
+        except Exception:
+            return False
     if not is_linux():
         return False
-    # heuristic: ldconfig listing or common .so
-    try:
-        out = subprocess.check_output(["/sbin/ldconfig", "-p"], text=True, stderr=subprocess.DEVNULL)
-        return "libpcap.so" in out
-    except Exception:
-        # fallback checks
-        candidates = ["/usr/lib/libpcap.so", "/usr/lib/x86_64-linux-gnu/libpcap.so"]
-        return any(os.path.exists(p) for p in candidates)
+    path = shutil.which('ldconfig')
+    if path:
+        try:
+            out = subprocess.check_output([path, '-p'], text=True, stderr=subprocess.DEVNULL)
+            if 'libpcap.so' in out:
+                return True
+        except Exception:
+            pass
+    candidates = ["/usr/lib/libpcap.so", "/usr/lib/x86_64-linux-gnu/libpcap.so"]
+    return any(os.path.exists(p) for p in candidates)
 
 
 @dataclass
@@ -71,15 +79,13 @@ class UploaderProcess:
 
     def _resolve_binary(self) -> str:
         if is_windows():
-            if self.cfg.binary_path_win and os.path.exists(self.cfg.binary_path_win):
+            if self.cfg.binary_path_win:
                 return self.cfg.binary_path_win
-            cand = os.path.join(_bin_dir(), "albiondata-client.exe")
-            return cand
+            return os.path.join(_bin_dir(), "albiondata-client.exe")
         else:
-            if self.cfg.binary_path_linux and os.path.exists(self.cfg.binary_path_linux):
+            if self.cfg.binary_path_linux:
                 return self.cfg.binary_path_linux
-            cand = os.path.join(_bin_dir(), "albiondata-client")
-            return cand
+            return os.path.join(_bin_dir(), "albiondata-client")
 
     def _build_args(self) -> List[str]:
         exe = self._resolve_binary()
@@ -92,6 +98,16 @@ class UploaderProcess:
             args.append(f"-interface={self.cfg.interface}")
         return args
 
+    def _validate_binary_path(self, exe: str) -> List[str]:
+        issues: List[str] = []
+        if not os.path.isabs(exe):
+            issues.append("Uploader path must be absolute.")
+        elif not os.path.exists(exe):
+            issues.append(f"Uploader not found at {exe}.")
+        elif not is_windows() and not os.access(exe, os.X_OK):
+            issues.append(f"Uploader at {exe} is not executable.")
+        return issues
+
     def preflight_warnings(self) -> List[str]:
         warn = []
         if is_windows() and not npcap_installed():
@@ -99,8 +115,7 @@ class UploaderProcess:
         if is_linux() and not libpcap_present():
             warn.append("libpcap not detected. Install libpcap (e.g., `sudo apt-get install -y libpcap0.8`).")
         exe = self._resolve_binary()
-        if not os.path.exists(exe):
-            warn.append(f"Uploader binary not found at {exe}.")
+        warn.extend(self._validate_binary_path(exe))
         return warn
 
     def start(self) -> None:
@@ -108,15 +123,22 @@ class UploaderProcess:
             return
         if not self.cfg.enabled:
             return
+        issues = self.preflight_warnings()
+        if issues:
+            raise RuntimeError("; ".join(issues))
         args = self._build_args()
-        creationflags = 0x08000000 if is_windows() else 0  # CREATE_NO_WINDOW
+        kwargs = {}
+        if is_windows():
+            CREATE_NO_WINDOW = 0x08000000
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            kwargs['creationflags'] = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         self.proc = subprocess.Popen(
             args,
             cwd=_app_root(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            creationflags=creationflags
+            **kwargs
         )
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -130,12 +152,15 @@ class UploaderProcess:
         if not self.proc or self.proc.poll() is not None:
             return
         try:
-            if is_windows() and hasattr(signal, "CTRL_BREAK_EVENT"):
-                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+            if is_windows():
+                try:
+                    self.proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except Exception:
+                    pass
             else:
                 self.proc.terminate()
             self.proc.wait(timeout=timeout)
-        except Exception:
+        except subprocess.TimeoutExpired:
             try:
                 self.proc.kill()
             except Exception:

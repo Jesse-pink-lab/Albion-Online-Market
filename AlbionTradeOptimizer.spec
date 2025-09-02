@@ -14,9 +14,12 @@ a = Analysis(
     datas=[
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
-        ('bin/albiondata-client.exe', 'bin'),
-        ('bin/albiondata-client', 'bin'),
-        ('bin/LICENSE.albiondata-client.txt', 'bin'),
+        ('README.md', '.'),
+        ('engine/config_schema.yaml', 'engine'),
+        ('bin/uploader-windows.exe', 'bin'),
+        ('bin/uploader-linux', 'bin'),
+        ('bin/uploader-macos', 'bin'),
+        ('bin/LICENSE.txt', 'bin'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
