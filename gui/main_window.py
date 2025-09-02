@@ -6,6 +6,8 @@ Provides the primary user interface for the application.
 
 import sys
 import logging
+import os
+import webbrowser
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -28,6 +30,7 @@ from gui.widgets.data_manager import DataManagerWidget
 from engine.config import ConfigManager
 from datasources.aodp import AODPClient
 from store.db import DatabaseManager
+from services.uploader import UploaderProcess, UploaderConfig
 
 
 class MainWindow(QMainWindow):
@@ -41,6 +44,8 @@ class MainWindow(QMainWindow):
         self.db_manager = db_manager or DatabaseManager(self.config)
         self.api_client = None
         self.settings = QSettings('AlbionTradeOptimizer', 'AlbionTradeOptimizer')
+        self.uploader: Optional[UploaderProcess] = None
+        self.uploader_log_lines: list[str] = []
         self.init_ui(); self.init_menu_bar(); self.init_tool_bar()
         self.init_status_bar(); self.init_system_tray()
         self.init_backend(); self.restore_window_state(); self.init_timers()
@@ -207,10 +212,31 @@ class MainWindow(QMainWindow):
             
             # Test API connection
             self.test_api_connection()
-            
+
+            # Initialize uploader
+            def _on_uploader_log(line: str):
+                self.uploader_log_lines.append(line)
+                self.statusBar().showMessage(line[:200])
+
+            u_cfg_dict = self.config_manager.get_uploader_config()
+            u_cfg = UploaderConfig(**u_cfg_dict)
+            self.uploader = UploaderProcess(cfg=u_cfg, on_log=_on_uploader_log)
+            warns = self.uploader.preflight_warnings()
+            if warns:
+                self.statusBar().showMessage('; '.join(warns)[:200])
+                if os.environ.get('CI') != 'true':
+                    for w in warns:
+                        if 'Npcap' in w:
+                            if QMessageBox.question(self, 'Npcap Missing', 'Npcap not detected. Open download page?', QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                                webbrowser.open('https://npcap.com')
+                        elif 'libpcap' in w:
+                            QMessageBox.warning(self, 'libpcap Missing', 'libpcap not detected. Try: `sudo apt-get install -y libpcap0.8`.')
+            if u_cfg.enabled and not warns and os.environ.get('CI') != 'true':
+                self.uploader.start()
+
         except Exception as e:
             self.logger.error(f"Failed to initialize backend: {e}")
-            self.show_error("Backend Initialization Error", 
+            self.show_error("Backend Initialization Error",
                           f"Failed to initialize backend components:\n{e}")
     
     def init_timers(self):
@@ -236,11 +262,32 @@ class MainWindow(QMainWindow):
                 self.connection_label.setText("🟡 Limited")
                 self.connection_label.setToolTip("API connection issues")
                 self.logger.warning("API connection test failed")
-                
+
         except Exception as e:
             self.connection_label.setText("🔴 Disconnected")
             self.connection_label.setToolTip(f"API connection error: {e}")
             self.logger.error(f"API connection test error: {e}")
+
+    def on_toggle_uploader(self, enabled: bool):
+        if not self.uploader:
+            return
+        self.uploader.cfg.enabled = enabled
+        if enabled:
+            warns = self.uploader.preflight_warnings()
+            if warns:
+                self.statusBar().showMessage('; '.join(warns)[:200])
+                if os.environ.get('CI') != 'true':
+                    for w in warns:
+                        if 'Npcap' in w:
+                            if QMessageBox.question(self, 'Npcap Missing', 'Npcap not detected. Open download page?', QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+                                webbrowser.open('https://npcap.com')
+                        elif 'libpcap' in w:
+                            QMessageBox.warning(self, 'libpcap Missing', 'libpcap not detected. Try: `sudo apt-get install -y libpcap0.8`.')
+                return
+            if os.environ.get('CI') != 'true':
+                self.uploader.start()
+        else:
+            self.uploader.stop()
     
     def refresh_data(self):
         """Refresh market data."""
@@ -383,11 +430,14 @@ class MainWindow(QMainWindow):
         
         if self.db_manager:
             self.db_manager.close()
-        
+
         # Stop timers
         if hasattr(self, 'refresh_timer'):
             self.refresh_timer.stop()
-        
+
+        if hasattr(self, 'uploader') and self.uploader:
+            self.uploader.stop()
+
         self.logger.info("Application closing")
         event.accept()
 

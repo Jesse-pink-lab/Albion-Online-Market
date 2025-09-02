@@ -26,3 +26,11 @@ aodp:
   chunk_size: 40
   rate_delay_seconds: 1
   timeout_seconds: 30
+uploader:
+  enabled: true
+  ingest_base: "http+pow://albion-online-data.com"
+  enable_websocket: true
+  interface: null        # auto
+  no_cpu_limit: false
+  binary_path_win: null  # optional override
+  binary_path_linux: null

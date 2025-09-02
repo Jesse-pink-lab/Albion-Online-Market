@@ -150,6 +150,15 @@ class ConfigManager:
                 'rate_delay_seconds': 1,
                 'timeout_seconds': 30
             },
+            'uploader': {
+                'enabled': True,
+                'ingest_base': "http+pow://albion-online-data.com",
+                'enable_websocket': True,
+                'interface': None,
+                'no_cpu_limit': False,
+                'binary_path_win': None,
+                'binary_path_linux': None,
+            },
             'app': {
                 'name': "Albion Trade Optimizer",
                 'version': "1.0.0",
@@ -264,6 +273,18 @@ class ConfigManager:
             errors.append("AODP base_url not configured")
         if 'server' not in aodp_config:
             errors.append("AODP server not configured")
-        
+
         return errors
+
+    def get_uploader_config(self):
+        cfg = self._config.get('uploader', {}) if self._config else {}
+        return {
+            'enabled': cfg.get('enabled', True),
+            'ingest_base': cfg.get('ingest_base', 'http+pow://albion-online-data.com'),
+            'enable_websocket': cfg.get('enable_websocket', True),
+            'interface': cfg.get('interface', None),
+            'no_cpu_limit': cfg.get('no_cpu_limit', False),
+            'binary_path_win': cfg.get('binary_path_win', None),
+            'binary_path_linux': cfg.get('binary_path_linux', None),
+        }
 
