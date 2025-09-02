@@ -1,69 +1,28 @@
-# Albion Trade Optimizer Configuration
-
-# Supported cities for trading
 cities:
-  - "Martlock"
-  - "Lymhurst"
-  - "Bridgewatch"
-  - "Fort Sterling"
-  - "Thetford"
-  - "Caerleon"
-  - "Black Market"
-
-# Data freshness settings
+  - Caerleon
+  - Lymhurst
 freshness:
   max_age_hours: 24
 
-# Fee configuration
 fees:
-  sales_tax_premium: 0.04      # 4% with Premium
-  sales_tax_no_premium: 0.08   # 8% without Premium
-  setup_fee: 0.025             # 2.5% setup fee for orders
+  sales_tax_premium: 0.04
+  sales_tax_no_premium: 0.08
+  setup_fee: 0.025
 
-# Premium status (affects sales tax)
 premium_enabled: true
 
-# Risk classification
 risk:
-  caerleon_high_risk: true     # Routes through Caerleon are high-risk
+  caerleon_high_risk: true
 
-# Crafting configuration
 crafting:
-  resource_return_rate: 0.15   # 15% resource return
-  use_focus: false             # Use focus for crafting
-  focus_return_rate: 0.35      # 35% focus return rate
-  default_station_fee: 0       # Default station fee
+  resource_return_rate: 0.15
+  use_focus: false
+  focus_return_rate: 0.35
+  default_station_fee: 0
 
 aodp:
   base_url: "https://www.albion-online-data.com/api/v2/stats"
-  server: "europe"             # Target game server
-  chunk_size: 40               # Items per API request
-  rate_delay_seconds: 1        # Delay between requests
-  timeout_seconds: 30          # Request timeout
-
-# Application settings
-app:
-  name: "Albion Trade Optimizer"
-  version: "1.0.0"
-  author: "Manus AI"
-  description: "Trade optimization tool for Albion Online"
-
-# Database settings
-database:
-  path: "data/albion_trade.db"
-  backup_count: 5
-
-# Logging configuration
-logging:
-  level: "INFO"
-  file: "logs/albion_trade.log"
-  max_size_mb: 10
-  backup_count: 5
-
-# UI settings
-ui:
-  theme: "light"
-  window_width: 1200
-  window_height: 800
-  refresh_interval_seconds: 300  # Auto-refresh interval
-
+  server: "europe"
+  chunk_size: 40
+  rate_delay_seconds: 1
+  timeout_seconds: 30
