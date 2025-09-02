@@ -31,6 +31,8 @@ class AODPClient:
         self.base_url = aodp_config.get(
             'base_url', 'https://www.albion-online-data.com/api/v2/stats'
         )
+        # Default to Europe server unless specified
+        self.server = aodp_config.get('server', 'europe')
         self.chunk_size = aodp_config.get('chunk_size', 40)
         self.rate_delay = aodp_config.get('rate_delay_seconds', 1)
         self.timeout = aodp_config.get('timeout_seconds', 30)
@@ -77,18 +79,23 @@ class AODPClient:
     def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the AODP API with error handling."""
         self._enforce_rate_limit()
-        
+
         # Ensure proper URL joining - base_url should end with / for urljoin to work correctly
         base_url = self.base_url
         if not base_url.endswith('/'):
             base_url += '/'
-        
+
         url = urljoin(base_url, endpoint)
-        
+
+        # Inject default server parameter if configured
+        request_params = dict(params or {})
+        if self.server and 'server' not in request_params:
+            request_params['server'] = self.server
+
         try:
-            self.logger.debug(f"Making request to {url} with params {params}")
-            
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            self.logger.debug(f"Making request to {url} with params {request_params}")
+
+            response = self.session.get(url, params=request_params, timeout=self.timeout)
             response.raise_for_status()
             
             # Parse JSON response
@@ -357,7 +364,11 @@ class AODPClient:
         """Get API server status information."""
         try:
             # Make a simple request to check server status
-            response = self.session.get(self.base_url.replace('/stats', ''), timeout=10)
+            response = self.session.get(
+                self.base_url.replace('/stats', ''),
+                params={'server': self.server} if self.server else None,
+                timeout=10,
+            )
             
             return {
                 'status': 'online' if response.status_code == 200 else 'error',
