@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
+from utils.pecheck import is_valid_win64_exe
+
 
 class SettingsWidget(QWidget):
     """Widget for application settings and configuration."""
@@ -128,19 +130,28 @@ class SettingsWidget(QWidget):
 
         uploader_layout.addWidget(QLabel("Albion Data Client Path:"), row, 0)
         self.albion_client_path_edit = QLineEdit()
-        self.albion_client_path_edit.textChanged.connect(lambda: setattr(self, 'modified', True))
+        self.albion_client_path_edit.textChanged.connect(self.update_albion_client_status)
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self.browse_albion_client_path)
         uploader_layout.addWidget(self.albion_client_path_edit, row, 1)
         uploader_layout.addWidget(browse_btn, row, 2)
         row += 1
 
-        use_bundled = QPushButton("Use bundled client")
-        use_bundled.clicked.connect(self.use_bundled_client)
-        uploader_layout.addWidget(use_bundled, row, 0)
-        download_btn = QPushButton("Download latest official client")
+        self.albion_client_status = QLabel("not validated")
+        uploader_layout.addWidget(self.albion_client_status, row, 1, 1, 2)
+        row += 1
+
+        program_btn = QPushButton("Use Program Files")
+        program_btn.clicked.connect(self.use_program_files)
+        uploader_layout.addWidget(program_btn, row, 0)
+
+        bundled_btn = QPushButton("Use Bundled")
+        bundled_btn.clicked.connect(self.use_bundled_client)
+        uploader_layout.addWidget(bundled_btn, row, 1)
+
+        download_btn = QPushButton("Download Latest")
         download_btn.clicked.connect(self.download_official_client)
-        uploader_layout.addWidget(download_btn, row, 1, 1, 2)
+        uploader_layout.addWidget(download_btn, row, 2)
         row += 1
 
         self.uploader_ws_check = QCheckBox("Enable WebSocket")
@@ -162,31 +173,54 @@ class SettingsWidget(QWidget):
         )
         if path:
             self.albion_client_path_edit.setText(path)
-            self.modified = True
+            self.update_albion_client_status()
 
     def use_bundled_client(self):
-        from services.albion_client import ensure_managed_from_embedded, managed_client_path
+        from services.albion_client import ensure_managed_from_embedded
 
         try:
             path = ensure_managed_from_embedded()
             self.albion_client_path_edit.setText(path)
-            self.modified = True
+            self.update_albion_client_status()
             QMessageBox.information(self, "Bundled Client", "Bundled client ready")
         except Exception as e:  # pragma: no cover - GUI warning
             QMessageBox.warning(self, "Bundled Client", str(e))
 
+    def use_program_files(self):
+        from services.albion_client import DEFAULT_PROG_FILES
+
+        path = DEFAULT_PROG_FILES
+        valid, reason = is_valid_win64_exe(path)
+        if valid:
+            self.albion_client_path_edit.setText(path)
+            self.update_albion_client_status()
+        else:
+            QMessageBox.warning(self, "Program Files", reason)
+
     def download_official_client(self):
-        from services.albion_client_fetch import download_client
+        from services.albion_client_fetch import fetch_latest_windows_client
         from services.albion_client import managed_client_path
 
-        dest = Path(managed_client_path())
+        dest = managed_client_path()
         try:
-            download_client(dest)
-            self.albion_client_path_edit.setText(str(dest))
-            self.modified = True
+            fetch_latest_windows_client(dest, prefer_installer=False)
+            self.albion_client_path_edit.setText(dest)
+            self.update_albion_client_status()
             QMessageBox.information(self, "Download", "Download complete")
         except Exception as e:  # pragma: no cover - network path
             QMessageBox.warning(self, "Download failed", str(e))
+
+    def update_albion_client_status(self):
+        path = self.albion_client_path_edit.text().strip()
+        if not path:
+            self.albion_client_status.setText("no path")
+            return
+        valid, reason = is_valid_win64_exe(path)
+        self.albion_client_status.setText("ok" if valid else reason)
+        self.logger.info(
+            "Albion client path set to %s -> %s", path, "ok" if valid else reason
+        )
+        self.modified = True
     
     def create_trading_settings(self, parent_layout):
         """Create trading settings section."""

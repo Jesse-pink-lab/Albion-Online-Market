@@ -9,7 +9,7 @@ from typing import Callable, Optional, Sequence
 
 from logging_config import get_logger
 from utils.pecheck import is_valid_win64_exe
-from .albion_client_fetch import download_client
+from .albion_client_fetch import fetch_latest_windows_client
 
 log = get_logger(__name__)
 
@@ -87,8 +87,10 @@ def find_client(
 
     if ask_download and ask_download():
         try:
-            download_client(MANAGED_CLIENT)
-            return str(MANAGED_CLIENT)
+            fetch_latest_windows_client(str(MANAGED_CLIENT), prefer_installer=False)
+            valid, _ = _log_candidate(MANAGED_CLIENT)
+            if valid:
+                return str(MANAGED_CLIENT)
         except Exception as exc:  # pragma: no cover - network issues
             log.error("Download failed: %s", exc)
     return None
