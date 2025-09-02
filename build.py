@@ -21,6 +21,16 @@ BUILD_DIR = Path("build")
 DIST_DIR = Path("dist")
 SPEC_FILE = f"{PROJECT_NAME}.spec"
 
+
+def ensure_no_placeholder() -> None:
+    bin_dir = Path("bin")
+    bad = list(bin_dir.glob("albiondata-client*"))
+    if bad:
+        names = ", ".join(str(p) for p in bad)
+        raise SystemExit(
+            f"Remove placeholder albiondata-client binaries before building: {names}"
+        )
+
 def clean_build():
     """Clean previous build artifacts."""
     print("🧹 Cleaning previous build artifacts...")
@@ -58,7 +68,7 @@ sys.path.insert(0, str(project_root))
 a = Analysis(
     ['{MAIN_SCRIPT}'],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=[('resources/windows/albiondata-client.exe', 'resources/windows')],
     datas=[
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
@@ -69,6 +79,7 @@ a = Analysis(
         ('bin/uploader-linux', 'bin'),
         ('bin/uploader-macos', 'bin'),
         ('bin/LICENSE.txt', 'bin'),
+        ('bin/LICENSE.albiondata-client.txt', 'resources/windows'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
@@ -186,9 +197,11 @@ def create_icon():
 def run_pyinstaller():
     """Run PyInstaller to build the executable."""
     print("🔨 Building executable with PyInstaller...")
-    
+
     try:
-        # Run PyInstaller with the spec file
+        ensure_no_placeholder()
+        if sys.platform.startswith("win"):
+            subprocess.run([sys.executable, "scripts/fetch_albion_client.py"], check=True)
         cmd = [sys.executable, "-m", "PyInstaller", "--clean", SPEC_FILE]
         
         print(f"Running: {' '.join(cmd)}")

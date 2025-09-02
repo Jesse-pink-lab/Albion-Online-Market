@@ -1,0 +1,3 @@
+# Ignore local albiondata-client binaries
+bin/albiondata-client*
+resources/windows/albiondata-client.exe

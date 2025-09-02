@@ -218,8 +218,10 @@ class MainWindow(QMainWindow):
             # Test API connection
             self.test_api_connection()
 
-            project_dir = str(Path(__file__).resolve().parents[1])
-            client_path = find_client(self.config.get('albion_client_path'), project_dir)
+            client_path = find_client(
+                self.config.get('albion_client_path'),
+                ask_download=self._prompt_download_client,
+            )
             if not client_path:
                 self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
             else:
@@ -263,10 +265,21 @@ class MainWindow(QMainWindow):
             self.connection_label.setToolTip(f"API connection error: {e}")
             self.logger.error(f"API connection test error: {e}")
 
+    def _prompt_download_client(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Albion Data Client",
+            "Download the official Windows client now?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        return reply == QMessageBox.Yes
+
     def on_toggle_uploader(self, enabled: bool):
-        project_dir = str(Path(__file__).resolve().parents[1])
         if enabled:
-            client_path = find_client(self.config.get('albion_client_path'), project_dir)
+            client_path = find_client(
+                self.config.get('albion_client_path'),
+                ask_download=self._prompt_download_client,
+            )
             if not client_path:
                 self.logger.error("Albion Data Client not found or invalid. Install the 64-bit client under 'C:\\Program Files\\Albion Data Client\\' or set a valid path in Settings.")
                 return
