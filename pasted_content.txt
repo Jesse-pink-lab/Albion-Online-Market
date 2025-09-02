@@ -1,0 +1,247 @@
+# MASTER PROMPT — “Albion Trade Optimizer” (Windows .exe)
+
+**Goal:** Build a Windows desktop application (with a signed `.exe` installer) that helps Albion Online players identify profitable **flip** opportunities between cities and decide whether to **craft** or **buy** items, using only public APIs and locally stored static game data. The app must not perform any in-game automation.
+
+## 1) Core Features
+
+### 1.1 Data Sources
+
+* **Live market prices:** Use the **Albion Online Data Project (AODP) API** for prices & history (public endpoints).
+
+  * Query multiple items × cities in batches; respect rate limits.
+  * Configurable freshness window (e.g., ignore quotes older than X hours).
+* **Static game data:** Item catalog & **crafting recipes**.
+
+  * Prefer OpenAlbion item IDs; load recipes from local JSON (shipped with app) with ability to update/import.
+
+### 1.2 Cities & Risk
+
+* Cities to support: `Martlock, Lymhurst, Bridgewatch, Fort Sterling, Thetford, Caerleon, Black Market`.
+* **Risk classification** (no transport cost used in profit math):
+
+  * **High-risk route:** any path that requires passing through **red zones to Caerleon**.
+  * **Low-risk:** all other city pairs.
+* App must let users **filter out high-risk** routes or include them with a **warning badge**. (No silver cost added—risk is informational.)
+
+### 1.3 Fees & Order Types (STRICT)
+
+* Selling:
+
+  * **Sales tax:** 4% with Premium, **8% without** (user toggle).
+  * **Sell order setup fee:** **2.5%** (applies only if placing a sell order).
+  * **Instant sell (sell into buy orders):** pay **sales tax only**; **no** setup fee.
+* Buying:
+
+  * **Instant buy:** **no** fee.
+  * **Buy order setup fee:** **2.5%** (applies only if placing a buy order).
+* These fees must be applied precisely in net profit/cost calculations.
+
+### 1.4 Flip Logic (per item × quality)
+
+For any **source city** → **destination city**:
+
+Compute both strategies:
+
+* **Strategy A (fast):**
+  Buy method at source = **Instant Buy** (pay market `sell_price_min`, no fee).
+  Sell method at dest = **Instant Sell** (sell into `buy_price_max`, pay **sales tax**, no setup fee).
+
+* **Strategy B (patient):**
+  Buy method at source = **Buy Order** (use `buy_price_max`, pay **2.5% setup fee** on that price).
+  Sell method at dest = **Sell Order** (use `sell_price_min`, pay **sales tax** **and** **2.5% setup fee**).
+
+> For each city pair, show **both** strategies and the **best profit per unit** with a tag “Fast” vs “Patient”. No transport cost; **risk flag only** if route involves Caerleon.
+
+### 1.5 Craft vs Buy vs Hybrid (Min-Cost Engine)
+
+For each craftable item:
+
+* Recursively evaluate **min cost** to obtain 1 unit by allowing a **hybrid** strategy:
+
+  * For each ingredient: either **buy** (cheapest across cities) or **craft** it (recursively).
+* Apply returns and fees:
+
+  * **Resource return rate** (configurable, e.g., 15%).
+  * **Focus return rate** (apply only if user toggles “Use focus”).
+  * **Station fee** (configurable per recipe or default).
+* Output: the **cheapest plan** (tree) with total cost and a readable plan summary (e.g., “Buy 8× T4 Leather; Craft 16× T4 Planks; then Craft T4 Bow”).
+
+### 1.6 Liquidity / “How many can I flip?”
+
+* Track **history** of prices (hourly snapshots) in a local database.
+* Derive a simple **activity score** per item × city:
+
+  * e.g., count of updates per day or the number of distinct price observations in the last N days.
+* Use activity score as a **volume hint**:
+
+  * Recommend a **conservative max quantity** for flips (e.g., based on recent observed floor/ceiling volumes; if not available, fall back to a configurable default).
+* Show warning if data is stale or activity is low.
+
+### 1.7 Persistence & Outputs
+
+* Store snapshots, flips, and craft plans in a **local SQLite** database (`/user/AppData/Roaming/AlbionTradeOptimizer/`).
+* Export **CSV** for:
+
+  * Current snapshot
+  * Top flips
+  * Craft min-cost table
+  * History extracts
+* Allow **Import/Export** of `recipes.json` and `items.txt`.
+
+## 2) Exact Calculations
+
+Let:
+
+* `p_sell_min` = lowest asking price at destination (used for Sell Orders)
+* `p_buy_max` = highest buy order at destination (used for Instant Sell)
+* `p_src_sell_min` = lowest ask at source (Instant Buy)
+* `p_src_buy_max` = highest buy order at source (Buy Order)
+* `sales_tax` = 0.04 (Premium) **or** 0.08 (no Premium)
+* `setup_fee` = 0.025
+
+**Buying:**
+
+* Instant Buy cost per unit = `p_src_sell_min`
+* Buy Order cost per unit = `p_src_buy_max * (1 + setup_fee)`
+
+**Selling:**
+
+* Instant Sell revenue per unit = `p_buy_max * (1 - sales_tax)`  *(no setup fee)*
+* Sell Order revenue per unit = `p_sell_min * (1 - sales_tax) - p_sell_min * setup_fee`
+
+**Flip Profit per unit:**
+
+* Strategy A (Fast) = `InstantSellRevenue_dest - InstantBuyCost_src`
+* Strategy B (Patient) = `SellOrderRevenue_dest - BuyOrderCost_src`
+
+**Craft Min-Cost (recursive):**
+
+* Ingredient cost = min( **buy** cost across cities, **craft** cost of ingredient )
+* Apply returns: `effective_ingredient_cost = ingredient_cost * (1 - resource_return) * (1 - focus_return_if_enabled)`
+* Add station fee(s)
+* Compare final **Craft cost** vs **Buy cost** of the item; choose the minimum.
+
+## 3) UX / UI Requirements
+
+### 3.1 Main Dashboard
+
+* City selector (multi-select), Quality selector, Premium toggle.
+* Freshness filter (max age hours).
+* Risk filter: **Include high-risk (Caerleon)** or **exclude**; if included, badge routes as **High Risk**.
+* “Scan Now” button to fetch latest prices (configurable items list).
+* **Top Flips** table:
+
+  * Columns: Item, Quality, From → To, Strategy (Fast/Patient), Profit per unit, Suggested Qty, Expected Profit, Risk badge, Last Update Age.
+  * Sortable; filterable by city, min profit, risk.
+  * Row click opens detail pane with both strategies side-by-side and price sources.
+
+### 3.2 Craft Optimizer View
+
+* Item search → shows **Min-Cost Plan** tree with totals.
+* Toggles: Use Focus, Resource Return %, Station Fee.
+* Button: **“Compare vs Flip”** (shows if flipping that item across cities beats crafting right now).
+
+### 3.3 History & Liquidity
+
+* Sparkline or simple chart of recent price points.
+* Activity score (e.g., updates/day) and **suggested max quantity**.
+
+### 3.4 Data Management
+
+* Buttons: **Export CSV**, **Import recipes.json**, **Edit items.txt**, **Reset DB**.
+* Status bar: API rate status, last fetch time, # of items fetched, # stale rows ignored.
+
+## 4) Architecture
+
+* **Language:** Python 3.11+
+* **GUI:** PySide6 (Qt for Python) or Tauri/Electron (if you prefer web UI; if Electron, bundle Python worker).
+* **Data Layer:** SQLite via SQLAlchemy; CSV export via pandas.
+* **HTTP:** `requests` with retry/backoff.
+* **Packaging:** PyInstaller to produce a **single-file .exe** + optional Inno Setup installer.
+
+**Modules:**
+
+* `datasources/aodp.py` — API client (batching, freshness filtering).
+* `recipes/loader.py` — load/validate recipes JSON.
+* `engine/fees.py` — exact fee math.
+* `engine/flips.py` — strategies A & B; risk tagging.
+* `engine/crafting.py` — recursive hybrid min-cost.
+* `engine/liquidity.py` — activity scoring from history.
+* `store/db.py` — SQLite schema & migrations.
+* `ui/` — views, filters, table models.
+* `jobs/scheduler.py` — periodic scans (optional).
+* `config.yaml` — cities, freshness, returns, installer metadata.
+
+## 5) Database Schema (SQLite)
+
+* `prices`
+  `(id, item_id, quality, city, sell_price_min, sell_price_max, buy_price_min, buy_price_max, observed_at_utc)`
+* `scans`
+  `(id, started_at_utc, finished_at_utc, items_count, cities_count, errors_json)`
+* `flips`
+  `(id, scan_id, item_id, quality, src_city, dst_city, strategy, profit_per_unit, suggested_qty, expected_profit, risk, computed_at_utc)`
+* `craft_plans`
+  `(id, scan_id, item_id, min_cost, plan_json, computed_at_utc)`
+* Indexes on `(item_id, city, quality, observed_at_utc)`.
+
+## 6) Config File (`config.yaml`)
+
+* `cities: [...]`
+* `freshness: { max_age_hours: 24 }`
+* `fees: { sales_tax_premium: 0.04, sales_tax_no_premium: 0.08, setup_fee: 0.025 }`
+* `premium_enabled: true|false`
+* `risk: { caerleon_high_risk: true }`
+* `crafting: { resource_return_rate: 0.15, use_focus: false, focus_return_rate: 0.35, default_station_fee: 0 }`
+* `aodp: { base_url, chunk_size, rate_delay_seconds, timeout_seconds }`
+
+## 7) Performance & Reliability
+
+* Batch item queries (e.g., 40/item chunk) and add jitter between calls.
+* Graceful handling of missing data (some items/cities may not have recent observations).
+* All calculations must **skip stale** entries beyond freshness threshold.
+* Clear error messages; log file under `%APPDATA%/AlbionTradeOptimizer/logs/`.
+
+## 8) Packaging to Windows .exe
+
+* Use **PyInstaller**:
+
+  * `pyinstaller --noconfirm --onefile --name "AlbionTradeOptimizer" --add-data "assets;assets" --add-data "recipes;recipes" main.py`
+* Create a simple **Inno Setup** script to produce a friendly installer:
+
+  * App name/version, install to `C:\Program Files\Albion Trade Optimizer\`
+  * Create Start Menu and Desktop shortcuts.
+  * Bundle `config.yaml`, `recipes.json`, `items.txt` into `%APPDATA%/AlbionTradeOptimizer/` on first run.
+* Optional: sign the binary (developer cert).
+
+## 9) Acceptance Criteria (must pass)
+
+1. Fee math matches spec for all four order types (instant buy / buy order / instant sell / sell order).
+2. Flip table shows **both** strategies and correctly tags **High Risk** only when route involves Caerleon.
+3. Craft optimizer returns a **hybrid plan** when it’s cheaper than pure buy or pure craft.
+4. Stale price rows beyond freshness threshold are excluded from all decisions.
+5. Exported CSVs match on-screen tables.
+6. App installs via `.exe` and runs on Windows 10/11 without Python pre-installed.
+
+## 10) Nice-to-Haves (if time permits)
+
+* Simple charts (matplotlib) for price & activity history.
+* “What-if” sliders for taxes/fees/focus/returns.
+* Per-route notes (your own comments).
+* Theme toggle (light/dark).
+
+---
+
+### Hand-off Notes
+
+* Ship with a **starter `items.txt`** and **placeholder `recipes.json`**.
+* Provide a short “How to update recipes” guide (pointing to OpenAlbion IDs).
+* Absolutely **no** in-game automation.
+
+**Build me this application per the above spec.** When done, deliver:
+
+1. Source code + build scripts.
+2. Signed `.exe` installer.
+3. Short user guide (PDF).
+4. A demo dataset and screenshots of the main views.
+
+
