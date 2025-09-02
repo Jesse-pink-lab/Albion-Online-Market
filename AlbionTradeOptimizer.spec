@@ -14,6 +14,9 @@ a = Analysis(
     datas=[
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
+        ('bin/albiondata-client.exe', 'bin'),
+        ('bin/albiondata-client', 'bin'),
+        ('bin/LICENSE.albiondata-client.txt', 'bin'),
     ],
     hiddenimports=[
         'PySide6.QtCore',

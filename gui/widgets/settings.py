@@ -39,12 +39,13 @@ class SettingsWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
-        
+
         # Create header
         self.create_header(layout)
-        
+
         # Create settings sections
         self.create_api_settings(layout)
+        self.create_uploader_settings(layout)
         self.create_trading_settings(layout)
         self.create_app_settings(layout)
         
@@ -107,6 +108,31 @@ class SettingsWidget(QWidget):
         row += 1
         
         parent_layout.addWidget(api_group)
+
+    def create_uploader_settings(self, parent_layout):
+        """Create uploader settings section."""
+        uploader_group = QGroupBox("Uploader")
+        uploader_layout = QGridLayout(uploader_group)
+        row = 0
+
+        self.uploader_enable_check = QCheckBox("Enable uploader")
+        uploader_layout.addWidget(self.uploader_enable_check, row, 0, 1, 2)
+        row += 1
+
+        uploader_layout.addWidget(QLabel("Interface:"), row, 0)
+        self.uploader_interface_edit = QLineEdit()
+        uploader_layout.addWidget(self.uploader_interface_edit, row, 1)
+        row += 1
+
+        self.uploader_ws_check = QCheckBox("Enable WebSocket")
+        uploader_layout.addWidget(self.uploader_ws_check, row, 0, 1, 2)
+        row += 1
+
+        uploader_layout.addWidget(QLabel("Ingest Base:"), row, 0)
+        self.uploader_ingest_edit = QLineEdit()
+        uploader_layout.addWidget(self.uploader_ingest_edit, row, 1)
+
+        parent_layout.addWidget(uploader_group)
     
     def create_trading_settings(self, parent_layout):
         """Create trading settings section."""
@@ -211,7 +237,7 @@ class SettingsWidget(QWidget):
             self.rate_delay_spin.setValue(aodp_config.get('rate_delay_seconds', 1.0))
             self.timeout_spin.setValue(aodp_config.get('timeout_seconds', 30))
             self.chunk_size_spin.setValue(aodp_config.get('chunk_size', 40))
-            
+
             # Trading settings
             self.premium_check.setChecked(self.config.get('premium_enabled', True))
             
@@ -230,6 +256,13 @@ class SettingsWidget(QWidget):
             self.max_age_spin.setValue(freshness_config.get('max_age_hours', 24))
             
             self.log_level_combo.setCurrentText(app_config.get('log_level', 'INFO'))
+
+            # Uploader settings
+            uploader_cfg = self.main_window.config_manager.get_uploader_config()
+            self.uploader_enable_check.setChecked(uploader_cfg.get('enabled', True))
+            self.uploader_interface_edit.setText(uploader_cfg.get('interface') or '')
+            self.uploader_ws_check.setChecked(uploader_cfg.get('enable_websocket', True))
+            self.uploader_ingest_edit.setText(uploader_cfg.get('ingest_base', 'http+pow://albion-online-data.com'))
             
             self.set_status("Settings loaded")
             
@@ -272,20 +305,32 @@ class SettingsWidget(QWidget):
             if 'freshness' not in config:
                 config['freshness'] = {}
             config['freshness']['max_age_hours'] = self.max_age_spin.value()
-            
+
+            # Uploader settings
+            config['uploader'] = {
+                'enabled': self.uploader_enable_check.isChecked(),
+                'interface': self.uploader_interface_edit.text() or None,
+                'enable_websocket': self.uploader_ws_check.isChecked(),
+                'ingest_base': self.uploader_ingest_edit.text() or 'http+pow://albion-online-data.com',
+            }
+
             # Save configuration
             self.main_window.config_manager.save_config(config)
             self.config = config
+            self.main_window.config = config
             self.modified = False
-            
+
             self.set_status("Settings saved successfully")
-            
+
             # Show restart message
             QMessageBox.information(
                 self,
                 "Settings Saved",
                 "Settings have been saved successfully.\n\nSome changes may require restarting the application to take effect."
             )
+
+            if hasattr(self.main_window, 'on_toggle_uploader'):
+                self.main_window.on_toggle_uploader(config['uploader']['enabled'])
             
         except Exception as e:
             self.logger.error(f"Failed to save settings: {e}")
