@@ -25,6 +25,7 @@ from gui.widgets.flip_finder import FlipFinderWidget
 from gui.widgets.crafting_optimizer import CraftingOptimizerWidget
 from gui.widgets.settings import SettingsWidget
 from gui.widgets.data_manager import DataManagerWidget
+from gui.widgets.market_prices import MarketPricesWidget
 
 # Import backend components
 from engine.config import ConfigManager
@@ -79,14 +80,18 @@ class MainWindow(QMainWindow):
         # Flip Finder tab
         self.flip_finder_widget = FlipFinderWidget(self)
         self.tab_widget.addTab(self.flip_finder_widget, "💰 Flip Finder")
-        
+
         # Crafting Optimizer tab
         self.crafting_optimizer_widget = CraftingOptimizerWidget(self)
         self.tab_widget.addTab(self.crafting_optimizer_widget, "🔨 Crafting")
-        
+
         # Data Manager tab
         self.data_manager_widget = DataManagerWidget(self)
         self.tab_widget.addTab(self.data_manager_widget, "📡 Data")
+
+        # Market Prices tab
+        self.market_prices_widget = MarketPricesWidget(self)
+        self.tab_widget.addTab(self.market_prices_widget, "💹 Prices")
         
         # Settings tab
         self.settings_widget = SettingsWidget(self)
