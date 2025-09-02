@@ -5,7 +5,6 @@ Handles database initialization, connections, and data access operations.
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -31,9 +30,6 @@ class DatabaseManager:
 
         # Ensure database directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # Start with a fresh database to ensure schema matches models
-        if self.db_path.exists():
-            self.db_path.unlink()
         
         # Create database URL
         self.db_url = f"sqlite:///{self.db_path}"
@@ -272,22 +268,18 @@ class DatabaseManager:
         try:
             plan_objects = []
             for plan_data in plans_data:
-                import json
+                quantity = plan_data.get('quantity', 1)
                 plan = CraftPlan(
                     scan_id=scan_id,
                     item_id=plan_data['item_id'],
-                    min_cost=plan_data['min_cost'],
-                    plan_json=json.dumps(plan_data['plan']),
-                    is_craftable=plan_data.get('is_craftable', True),
-                    craft_cost=plan_data.get('craft_cost'),
-                    buy_cost=plan_data.get('buy_cost'),
-                    recommended_action=plan_data['recommended_action']
+                    quantity=quantity,
+                    total_cost=plan_data['min_cost'] * quantity,
                 )
                 plan_objects.append(plan)
-            
+
             session.add_all(plan_objects)
             session.commit()
-            
+
             self.logger.info(f"Saved {len(plan_objects)} craft plans")
             return len(plan_objects)
             
@@ -498,19 +490,14 @@ class DatabaseManager:
             session.close()
     
     def clear_cache(self):
-        """Clear all cached price data."""
+        """Clear cached volatile data from the database."""
         session = self.get_session()
         try:
-            # Delete all price records
-            deleted_count = session.query(Price).delete()
+            session.query(Price).delete()
+            session.query(Flip).delete()
+            session.query(Scan).delete()
             session.commit()
-            
-            self.logger.info(f"Cleared {deleted_count} price records from cache")
-            
-        except Exception as e:
-            session.rollback()
-            self.logger.error(f"Failed to clear cache: {e}")
-            raise
+            self.logger.info("Cache cleared")
         finally:
             session.close()
     
@@ -526,10 +513,8 @@ class DatabaseManager:
     
     def close(self):
         """Close database connections."""
-        try:
-            if hasattr(self, 'engine') and self.engine:
-                self.engine.dispose()
-                self.logger.info("Database connections closed")
-        except Exception as e:
-            self.logger.error(f"Error closing database: {e}")
+        if self.SessionLocal:
+            self.SessionLocal.close_all()
+        if self.engine:
+            self.engine.dispose()
 

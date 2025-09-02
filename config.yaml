@@ -34,13 +34,12 @@ crafting:
   focus_return_rate: 0.35      # 35% focus return rate
   default_station_fee: 0       # Default station fee
 
-# Albion Online Data Project API settings
-  aodp:
-    base_url: "https://www.albion-online-data.com/api/v2/stats"
-    server: "europe"             # Target game server
-    chunk_size: 40               # Items per API request
-    rate_delay_seconds: 1        # Delay between requests
-    timeout_seconds: 30          # Request timeout
+aodp:
+  base_url: "https://www.albion-online-data.com/api/v2/stats"
+  server: "europe"             # Target game server
+  chunk_size: 40               # Items per API request
+  rate_delay_seconds: 1        # Delay between requests
+  timeout_seconds: 30          # Request timeout
 
 # Application settings
 app:

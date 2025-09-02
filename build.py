@@ -61,12 +61,12 @@ a = Analysis(
     binaries=[],
     datas=[
         ('config.yaml', '.'),
-        ('recipes/recipes.json', 'recipes/'),
-        ('recipes/items.txt', 'recipes/'),
+        ('recipes/*.json', 'recipes'),
+        ('recipes/items.txt', 'recipes'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
-        'PySide6.QtWidgets', 
+        'PySide6.QtWidgets',
         'PySide6.QtGui',
         'sqlalchemy.dialects.sqlite',
         'sqlalchemy.pool',
@@ -74,6 +74,7 @@ a = Analysis(
         'requests',
         'pandas',
         'numpy',
+        'jinja2',
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -151,7 +152,7 @@ VSVersionInfo(
         StringStruct(u'FileDescription', u'Albion Trade Optimizer - Trade analysis tool for Albion Online'),
         StringStruct(u'FileVersion', u'{VERSION}'),
         StringStruct(u'InternalName', u'{PROJECT_NAME}'),
-        StringStruct(u'LegalCopyright', u'Copyright © 2025 Manus AI'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) 2025 Manus AI'),
         StringStruct(u'OriginalFilename', u'{PROJECT_NAME}.exe'),
         StringStruct(u'ProductName', u'Albion Trade Optimizer'),
         StringStruct(u'ProductVersion', u'{VERSION}')])
@@ -288,7 +289,7 @@ def create_license():
         print("📄 Creating license file...")
         
         license_text = f'''Albion Trade Optimizer v{VERSION}
-Copyright © 2025 Manus AI
+Copyright (c) 2025 Manus AI
 
 This software is provided "as is" without warranty of any kind.
 

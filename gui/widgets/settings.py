@@ -213,8 +213,7 @@ class SettingsWidget(QWidget):
             self.chunk_size_spin.setValue(aodp_config.get('chunk_size', 40))
             
             # Trading settings
-            fees_config = self.config.get('fees', {})
-            self.premium_check.setChecked(fees_config.get('premium', False))
+            self.premium_check.setChecked(self.config.get('premium_enabled', True))
             
             cities = self.config.get('cities', [])
             self.cities_edit.setText(','.join(cities))
@@ -253,9 +252,7 @@ class SettingsWidget(QWidget):
             config['aodp']['chunk_size'] = self.chunk_size_spin.value()
             
             # Trading settings
-            if 'fees' not in config:
-                config['fees'] = {}
-            config['fees']['premium'] = self.premium_check.isChecked()
+            config['premium_enabled'] = self.premium_check.isChecked()
             
             cities_text = self.cities_edit.text().strip()
             if cities_text:

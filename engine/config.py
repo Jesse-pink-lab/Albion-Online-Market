@@ -111,7 +111,7 @@ class ConfigManager:
             raise
     
     def get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration (public method)."""
+        """Return default configuration values."""
         return self._get_default_config()
     
     def _get_default_config(self) -> Dict[str, Any]:
