@@ -5,13 +5,15 @@ Allows users to configure application settings and preferences.
 """
 
 import logging
+import os
+from pathlib import Path
 from typing import Dict, Any
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QSpinBox, QCheckBox,
     QComboBox, QGroupBox, QFrame, QDoubleSpinBox,
-    QTextEdit, QMessageBox
+    QTextEdit, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -124,6 +126,23 @@ class SettingsWidget(QWidget):
         uploader_layout.addWidget(self.uploader_interface_edit, row, 1)
         row += 1
 
+        uploader_layout.addWidget(QLabel("Albion Data Client Path:"), row, 0)
+        self.albion_client_path_edit = QLineEdit()
+        self.albion_client_path_edit.textChanged.connect(lambda: setattr(self, 'modified', True))
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_albion_client_path)
+        uploader_layout.addWidget(self.albion_client_path_edit, row, 1)
+        uploader_layout.addWidget(browse_btn, row, 2)
+        row += 1
+
+        use_bundled = QPushButton("Use bundled client")
+        use_bundled.clicked.connect(self.use_bundled_client)
+        uploader_layout.addWidget(use_bundled, row, 0)
+        download_btn = QPushButton("Download latest official client")
+        download_btn.clicked.connect(self.download_official_client)
+        uploader_layout.addWidget(download_btn, row, 1, 1, 2)
+        row += 1
+
         self.uploader_ws_check = QCheckBox("Enable WebSocket")
         uploader_layout.addWidget(self.uploader_ws_check, row, 0, 1, 2)
         row += 1
@@ -133,6 +152,41 @@ class SettingsWidget(QWidget):
         uploader_layout.addWidget(self.uploader_ingest_edit, row, 1)
 
         parent_layout.addWidget(uploader_group)
+
+    def browse_albion_client_path(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Albion Data Client",
+            "",
+            "Executable (*.exe)" if os.name == "nt" else "",
+        )
+        if path:
+            self.albion_client_path_edit.setText(path)
+            self.modified = True
+
+    def use_bundled_client(self):
+        from services.albion_client import ensure_managed_from_embedded, managed_client_path
+
+        try:
+            path = ensure_managed_from_embedded()
+            self.albion_client_path_edit.setText(path)
+            self.modified = True
+            QMessageBox.information(self, "Bundled Client", "Bundled client ready")
+        except Exception as e:  # pragma: no cover - GUI warning
+            QMessageBox.warning(self, "Bundled Client", str(e))
+
+    def download_official_client(self):
+        from services.albion_client_fetch import download_client
+        from services.albion_client import managed_client_path
+
+        dest = Path(managed_client_path())
+        try:
+            download_client(dest)
+            self.albion_client_path_edit.setText(str(dest))
+            self.modified = True
+            QMessageBox.information(self, "Download", "Download complete")
+        except Exception as e:  # pragma: no cover - network path
+            QMessageBox.warning(self, "Download failed", str(e))
     
     def create_trading_settings(self, parent_layout):
         """Create trading settings section."""
@@ -268,6 +322,7 @@ class SettingsWidget(QWidget):
             self.uploader_interface_edit.setText(uploader_cfg.get('interface') or '')
             self.uploader_ws_check.setChecked(uploader_cfg.get('enable_websocket', True))
             self.uploader_ingest_edit.setText(uploader_cfg.get('ingest_base', 'http+pow://albion-online-data.com'))
+            self.albion_client_path_edit.setText(self.config.get('albion_client_path', '') or '')
             
             self.set_status("Settings loaded")
             
@@ -321,6 +376,7 @@ class SettingsWidget(QWidget):
                 'enable_websocket': self.uploader_ws_check.isChecked(),
                 'ingest_base': self.uploader_ingest_edit.text() or 'http+pow://albion-online-data.com',
             }
+            config['albion_client_path'] = self.albion_client_path_edit.text() or None
 
             # Save configuration
             self.main_window.config_manager.save_config(config)

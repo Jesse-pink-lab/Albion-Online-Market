@@ -10,7 +10,7 @@ sys.path.insert(0, str(project_root))
 a = Analysis(
     ['main.py'],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=[('resources/windows/albiondata-client.exe', 'resources/windows')],
     datas=[
         ('config.yaml', '.'),
         ('recipes/*.json', 'recipes'),
@@ -20,6 +20,7 @@ a = Analysis(
         ('bin/uploader-linux', 'bin'),
         ('bin/uploader-macos', 'bin'),
         ('bin/LICENSE.txt', 'bin'),
+        ('bin/LICENSE.albiondata-client.txt', 'resources/windows'),
     ],
     hiddenimports=[
         'PySide6.QtCore',
