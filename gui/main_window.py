@@ -37,6 +37,8 @@ from services.albion_client import (
     launch_client_with_fallback,
     capture_subproc_version,
 )
+from core.signals import signals
+from core.health import health_store
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
         self.init_ui(); self.init_menu_bar(); self.init_tool_bar()
         self.init_status_bar(); self.init_system_tray()
         self.init_backend(); self.restore_window_state(); self.init_timers()
+        signals.health_changed.connect(self.on_health_changed)
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -192,9 +195,9 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.progress_bar.setMaximumWidth(200)
         self.status_bar.addPermanentWidget(self.progress_bar)
-        
+
         # Connection status
-        self.connection_label = QLabel("🔴 Disconnected")
+        self.connection_label = QLabel("🔴 Offline")
         self.status_bar.addPermanentWidget(self.connection_label)
 
     def set_refresh_enabled(self, enabled: bool) -> None:
@@ -397,6 +400,13 @@ class MainWindow(QMainWindow):
     def show_info(self, title: str, message: str):
         """Show information message dialog."""
         QMessageBox.information(self, title, message)
+
+    def on_health_changed(self, store) -> None:
+        """Update connection indicator when health changes."""
+        if store.aodp_online:
+            self.connection_label.setText("🟢 Online")
+        else:
+            self.connection_label.setText("🔴 Offline")
     
     def get_config(self) -> Dict[str, Any]:
         """Get application configuration."""

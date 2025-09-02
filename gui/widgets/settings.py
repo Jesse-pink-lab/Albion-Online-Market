@@ -241,6 +241,12 @@ class SettingsWidget(QWidget):
         self.cities_edit.setPlaceholderText("Martlock,Lymhurst,Bridgewatch,Fort Sterling,Thetford,Caerleon")
         trading_layout.addWidget(self.cities_edit, row, 1)
         row += 1
+
+        # Fetch all items toggle
+        trading_layout.addWidget(QLabel("Fetch Scope:"), row, 0)
+        self.fetch_all_check = QCheckBox("Fetch all items")
+        trading_layout.addWidget(self.fetch_all_check, row, 1)
+        row += 1
         
         # Min profit threshold
         trading_layout.addWidget(QLabel("Min Profit Threshold:"), row, 0)
@@ -335,6 +341,8 @@ class SettingsWidget(QWidget):
             thresholds = self.config.get('thresholds', {})
             self.min_profit_spin.setValue(thresholds.get('min_profit', 1000))
             self.min_roi_spin.setValue(thresholds.get('min_roi_percent', 5.0))
+
+            self.fetch_all_check.setChecked(self.config.get('fetch_all_items', False))
             
             # App settings
             app_config = self.config.get('app', {})
@@ -389,6 +397,7 @@ class SettingsWidget(QWidget):
                 config['thresholds'] = {}
             config['thresholds']['min_profit'] = self.min_profit_spin.value()
             config['thresholds']['min_roi_percent'] = self.min_roi_spin.value()
+            config['fetch_all_items'] = self.fetch_all_check.isChecked()
             
             # App settings
             if 'app' not in config:

@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
+from core.signals import signals
+from utils.timefmt import fmt_tooltip
 
 
 class DataManagerWidget(QWidget):
@@ -252,8 +254,9 @@ class DataManagerWidget(QWidget):
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(30000)  # Update every 30 seconds
-        
+
         # Initial status update
+        signals.health_changed.connect(self.on_health_changed)
         self.update_status()
     
     def update_status(self):
@@ -262,13 +265,7 @@ class DataManagerWidget(QWidget):
             # Check API status
             api_client = self.main_window.get_api_client()
             if api_client:
-                server_status = api_client.get_server_status()
-                if server_status['status'] == 'online':
-                    self.api_status_card.value_label.setText("🟢 Online")
-                    self.api_status_card.subtitle_label.setText(f"{server_status.get('response_time_ms', 0):.0f}ms")
-                else:
-                    self.api_status_card.value_label.setText("🔴 Offline")
-                    self.api_status_card.subtitle_label.setText("Connection Error")
+                api_client.get_server_status()
             else:
                 self.api_status_card.value_label.setText("❌ N/A")
                 self.api_status_card.subtitle_label.setText("Not Initialized")
@@ -308,6 +305,15 @@ class DataManagerWidget(QWidget):
             
         except Exception as e:
             self.logger.error(f"Failed to update status: {e}")
+
+    def on_health_changed(self, store) -> None:
+        if store.aodp_online:
+            self.api_status_card.value_label.setText("🟢 Online")
+            if store.last_checked:
+                self.api_status_card.subtitle_label.setText(fmt_tooltip(store.last_checked))
+        else:
+            self.api_status_card.value_label.setText("🔴 Offline")
+            self.api_status_card.subtitle_label.setText("Connection Error")
     
     def update_sources_table(self):
         """Update data sources table."""

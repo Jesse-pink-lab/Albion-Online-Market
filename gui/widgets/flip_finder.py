@@ -5,7 +5,7 @@ Allows users to search for and analyze flip opportunities.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 
 from PySide6.QtWidgets import (
@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QProgressBar, QFrame, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from utils.timefmt import to_utc, rel_age, fmt_tooltip
+from utils.items import parse_items_input
 from PySide6.QtGui import QFont, QColor
 
 from engine.flips import FlipCalculator, FlipOpportunity
@@ -414,9 +416,20 @@ class FlipFinderWidget(QWidget):
         params = {}
         
         # Items
-        items_text = self.items_edit.text().strip()
-        if items_text:
-            params['items'] = [item.strip() for item in items_text.split(',')]
+        cfg = self.main_window.get_config()
+        raw = self.items_edit.text()
+        all_items = None
+        if cfg.get('fetch_all_items'):
+            try:
+                from recipes.loader import RecipeLoader
+                loader = RecipeLoader()
+                loader.load_recipes()
+                all_items = list(loader.recipes.keys())
+            except Exception:
+                all_items = []
+        items = parse_items_input(raw, cfg.get('fetch_all_items', False), all_items)
+        if items:
+            params['items'] = items
         
         # Cities
         cities_selection = self.cities_combo.currentText()
@@ -525,8 +538,10 @@ class FlipFinderWidget(QWidget):
             self.results_table.setItem(row, 7, risk_item)
             
             # Updated (time since last price update)
-            # This would need to be calculated from the price data
-            updated_item = QTableWidgetItem("Recent")
+            dt = datetime.utcnow() - timedelta(hours=opp.last_update_age_hours)
+            dt = dt.replace(tzinfo=timezone.utc)
+            updated_item = QTableWidgetItem(rel_age(dt))
+            updated_item.setToolTip(fmt_tooltip(dt))
             self.results_table.setItem(row, 8, updated_item)
         
         # Sort by profit (descending) by default

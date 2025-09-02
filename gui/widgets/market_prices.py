@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List
+from datetime import datetime
 
 import requests
 from PySide6.QtCore import Qt, QThread
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from services.market_prices import fetch_prices
+from utils.timefmt import to_utc, rel_age, fmt_tooltip
+from core.signals import signals
 
 
 class MarketPricesWidget(QWidget):
@@ -102,8 +105,8 @@ class MarketPricesWidget(QWidget):
                 "Sell Max",
                 "Buy Max",
                 "Buy Min",
-                "Last Update Sell",
-                "Last Update Buy",
+                "Updated Sell",
+                "Updated Buy",
             ]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -163,12 +166,22 @@ class MarketPricesWidget(QWidget):
             self.table.setItem(row_index, 5, QTableWidgetItem(str(row["sell_max"])))
             self.table.setItem(row_index, 6, QTableWidgetItem(str(row["buy_max"])))
             self.table.setItem(row_index, 7, QTableWidgetItem(str(row["buy_min"])))
-            self.table.setItem(
-                row_index, 8, QTableWidgetItem(row["last_update_sell"] or "")
-            )
-            self.table.setItem(
-                row_index, 9, QTableWidgetItem(row["last_update_buy"] or "")
-            )
+
+            sell_dt = row.get("last_update_sell")
+            item = QTableWidgetItem("")
+            if sell_dt:
+                dt = to_utc(sell_dt)
+                item.setText(rel_age(dt))
+                item.setToolTip(fmt_tooltip(dt))
+            self.table.setItem(row_index, 8, item)
+
+            buy_dt = row.get("last_update_buy")
+            item = QTableWidgetItem("")
+            if buy_dt:
+                dt = to_utc(buy_dt)
+                item.setText(rel_age(dt))
+                item.setToolTip(fmt_tooltip(dt))
+            self.table.setItem(row_index, 9, item)
 
     def update_summary_from_selection(self) -> None:
         items = self.table.selectedItems()
@@ -180,12 +193,19 @@ class MarketPricesWidget(QWidget):
         info = self.summary.get(item_id)
         if not info:
             return
-        bb = info["best_buy"]
-        bs = info["best_sell"]
-        if bb["city"] is not None:
-            self.best_buy_label.setText(f"Best Buy: {bb['city']} @ {bb['price']}")
-        if bs["city"] is not None:
-            self.best_sell_label.setText(f"Best Sell: {bs['city']} @ {bs['price']}")
+        bb = info.get("sell_price_min", {})
+        bs = info.get("buy_price_max", {})
+        age = None
+        if bs.get("date"):
+            dt = to_utc(bs["date"])
+            age = rel_age(dt)
+        if bb.get("city") is not None and bs.get("city") is not None:
+            self.best_buy_label.setText(
+                f"Buy @ {bb['city']} {bb['price']} | Sell @ {bs['city']} {bs['price']} ({age or '?'})"
+            )
+        else:
+            self.best_buy_label.setText("Best Buy: -")
+        self.best_sell_label.setText("")
 
     # ------------------------------------------------------------------
     # Refresh handling
@@ -248,6 +268,14 @@ class MarketPricesWidget(QWidget):
             payload.get("result", {}).get("records"),
             elapsed,
         )
+        summary = {
+            "last_update_utc": datetime.utcnow().isoformat() + "Z",
+            "records": payload.get("result", {}).get("records"),
+            "best_flip": None,
+            "best_craft": None,
+            "activity": None,
+        }
+        signals.market_data_ready.emit(summary)
         self._refresh_cleanup()
 
     def on_refresh_error(self, err: str) -> None:

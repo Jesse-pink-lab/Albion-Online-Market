@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from urllib.parse import urljoin
 import json
+from core.health import update_aodp_status
 
 
 class AODPAPIError(Exception):
@@ -369,15 +370,18 @@ class AODPClient:
                 params={'server': self.server} if self.server else None,
                 timeout=10,
             )
-            
+
+            online = response.status_code == 200
+            update_aodp_status(online)
             return {
-                'status': 'online' if response.status_code == 200 else 'error',
+                'status': 'online' if online else 'error',
                 'status_code': response.status_code,
                 'response_time_ms': response.elapsed.total_seconds() * 1000,
                 'base_url': self.base_url
             }
-            
+
         except Exception as e:
+            update_aodp_status(False)
             return {
                 'status': 'offline',
                 'error': str(e),
