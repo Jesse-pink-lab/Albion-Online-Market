@@ -5,8 +5,43 @@ from datetime import datetime, timezone
 import math
 import logging
 import numpy as np
+try:  # pragma: no cover - optional dependency
+    import pandas as pd
+except Exception:  # pragma: no cover - handled in tests
+    pd = None
+
+from utils.timefmt import rel_age
 
 log = logging.getLogger(__name__)
+
+
+def _to_py_utc(dt):
+    """Best-effort conversion of ``dt`` to a timezone-aware UTC ``datetime``."""
+    if dt is None:
+        return None
+    if isinstance(dt, float):
+        if pd is not None:
+            if pd.isna(dt):
+                return None
+        else:
+            if math.isnan(dt):
+                return None
+    try:
+        if pd is not None and isinstance(dt, pd.Timestamp):
+            dt = dt.to_pydatetime()
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            if dt.year < 2000 or dt.year > 2100:
+                return None
+            return dt
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return None
 
 
 def _coerce_datetime_series(s):
@@ -38,31 +73,6 @@ def _coerce_datetime_series(s):
     return dt
 
 
-def _to_dt(x):
-    from datetime import datetime, timezone
-    if isinstance(x, datetime):
-        return x if x.tzinfo else x.replace(tzinfo=timezone.utc)
-    if isinstance(x, (int, float)):
-        if isinstance(x, float) and math.isnan(x):
-            return None
-        v = int(x)
-        try:
-            if v > 10_000_000_000_000:  # µs
-                return datetime.fromtimestamp(v / 1_000_000, tz=timezone.utc)
-            if v > 10_000_000_000:  # ms
-                return datetime.fromtimestamp(v / 1_000, tz=timezone.utc)
-            return datetime.fromtimestamp(v, tz=timezone.utc)
-        except Exception:
-            return None
-    if isinstance(x, str):
-        s = x.rstrip("Z")
-        try:
-            return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
-        except Exception:
-            return None
-    return None
-
-
 def compute_flips(
     rows: List[Dict],
     cities: Optional[Sequence[str]] = None,
@@ -80,135 +90,127 @@ def compute_flips(
         "All" if not qualities else len(qualities),
         max_age_hours,
     )
-    try:
-        import pandas as pd
-    except Exception:
+    if pd is None:
         return compute_flips_py(
             rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours
         )
 
-    if not rows:
-        return []
+    try:
+        if not rows:
+            return []
 
-    df = pd.DataFrame(
-        rows,
-        columns=[
-            "item_id",
-            "city",
-            "quality",
-            "buy_price_max",
-            "sell_price_min",
-            "updated_dt",
-        ],
-    )
-
-    # Reduce to necessary columns and drop zeros early
-    df = df[(df["buy_price_max"] > 0) | (df["sell_price_min"] > 0)]
-    df["item_id"] = df["item_id"].astype("category")
-    df["city"] = df["city"].astype("category")
-
-    # Filters
-    if cities:
-        df = df[df["city"].isin(list(cities))]
-    if qualities:
-        df = df[df["quality"].isin(list(qualities))]
-
-    # Age filter
-    if max_age_hours and max_age_hours > 0:
-        dt = _coerce_datetime_series(df["updated_dt"])
-        cutoff = pd.Timestamp.utcnow() - pd.Timedelta(hours=max_age_hours)
-        df = df[dt >= cutoff]
-    df = df.copy()
-    df["udt"] = _coerce_datetime_series(df["updated_dt"])
-    # clean numeric columns and drop zeros/negatives
-    df["buy_price_max"] = pd.to_numeric(df["buy_price_max"], errors="coerce").fillna(0).astype(np.int64)
-    df["sell_price_min"] = pd.to_numeric(df["sell_price_min"], errors="coerce").fillna(0).astype(np.int64)
-
-    if df.empty:
-        return []
-
-    # Per item×city bests
-    grp = df.groupby(["item_id", "city"], as_index=False).agg(
-        buy=("buy_price_max", "max"),
-        sell=("sell_price_min", "min"),
-        updated=("udt", "max"),
-        qual=("quality", "max"),
-    )
-
-    # Drop zeros and non-sense
-    grp = grp[(grp["buy"] > 0) | (grp["sell"] > 0)]
-    grp = grp[(grp["buy"] >= 0) & (grp["sell"] >= 0)]
-    log.info("Flip search: grouped item×city = %d (after filters)", len(grp))
-    if grp.empty:
-        return []
-
-    # Build city→city pairs per item
-    left = grp[["item_id", "city", "buy", "updated"]].rename(
-        columns={"city": "buy_city", "buy": "buy", "updated": "updated_buy"}
-    )
-    right = grp[["item_id", "city", "sell", "updated"]].rename(
-        columns={"city": "sell_city", "sell": "sell", "updated": "updated_sell"}
-    )
-
-    pairs = left.merge(right, on="item_id", how="inner")
-    pairs = pairs[pairs["buy_city"] != pairs["sell_city"]]
-    pair_count = len(pairs)
-
-    pairs = pairs[pairs["buy"] > 0]
-    pairs["spread"] = (pairs["sell"] - pairs["buy"]).clip(lower=0)
-    pairs["roi_pct"] = (pairs["spread"] / pairs["buy"]) * 100.0
-    # guard against absurd ROI (e.g., stale bad quotes)
-    pairs = pairs.replace([np.inf, -np.inf], np.nan).dropna(subset=["roi_pct"])
-    pairs = pairs[pairs["roi_pct"] < 100000]  # 1e5% max cap
-
-    before_threshold = len(pairs)
-    if min_profit:
-        pairs = pairs[pairs["spread"] >= int(min_profit)]
-    if min_roi:
-        pairs = pairs[pairs["roi_pct"] >= float(min_roi)]
-    after_threshold = len(pairs)
-    log.info(
-        "Flip search: pairs computed = %d, candidates after thresholds = %d",
-        pair_count,
-        after_threshold,
-    )
-
-    if pairs.empty:
-        return []
-
-    pairs = pairs.sort_values(["roi_pct", "spread"], ascending=[False, False]).head(
-        int(max_results)
-    )
-
-    now = pd.Timestamp.utcnow()
-
-    def rel(dt):
-        if not pd.isna(dt):
-            secs = (now - pd.to_datetime(dt, utc=True)).total_seconds()
-            if secs < 60:
-                return f"{int(secs)}s"
-            mins = int(secs // 60)
-            if mins < 60:
-                return f"{mins}m"
-            return f"{int(mins // 60)}h"
-        return ""
-
-    out = []
-    for r in pairs.itertuples(index=False):
-        out.append(
-            {
-                "item": r.item_id,
-                "buy_city": r.buy_city,
-                "sell_city": r.sell_city,
-                "buy": int(r.buy),
-                "sell": int(r.sell),
-                "spread": int(r.spread),
-                "roi_pct": float(r.roi_pct),
-                "updated_age": rel(r.updated_buy) if pd.notna(r.updated_buy) else rel(r.updated_sell),
-                "updated_dt": str(r.updated_buy if pd.notna(r.updated_buy) else r.updated_sell),
-            }
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "item_id",
+                "city",
+                "quality",
+                "buy_price_max",
+                "sell_price_min",
+                "updated_dt",
+            ],
         )
-    return out
+
+        # Reduce to necessary columns and drop zeros early
+        df = df[(df["buy_price_max"] > 0) | (df["sell_price_min"] > 0)]
+        df["item_id"] = df["item_id"].astype("category")
+        df["city"] = df["city"].astype("category")
+
+        # Filters
+        if cities:
+            df = df[df["city"].isin(list(cities))]
+        if qualities:
+            df = df[df["quality"].isin(list(qualities))]
+
+        # Age filter
+        if max_age_hours and max_age_hours > 0:
+            dt = _coerce_datetime_series(df["updated_dt"])
+            cutoff = pd.Timestamp.utcnow() - pd.Timedelta(hours=max_age_hours)
+            df = df[dt >= cutoff]
+        df = df.copy()
+        df["udt"] = _coerce_datetime_series(df["updated_dt"])
+        # clean numeric columns and drop zeros/negatives
+        df["buy_price_max"] = pd.to_numeric(df["buy_price_max"], errors="coerce").fillna(0).astype(np.int64)
+        df["sell_price_min"] = pd.to_numeric(df["sell_price_min"], errors="coerce").fillna(0).astype(np.int64)
+
+        if df.empty:
+            return []
+
+        # Per item×city bests
+        grp = df.groupby(["item_id", "city"], as_index=False, observed=False).agg(
+            buy=("buy_price_max", "max"),
+            sell=("sell_price_min", "min"),
+            updated=("udt", "max"),
+            qual=("quality", "max"),
+        )
+
+        # Drop zeros and non-sense
+        grp = grp[(grp["buy"] > 0) | (grp["sell"] > 0)]
+        grp = grp[(grp["buy"] >= 0) & (grp["sell"] >= 0)]
+        log.info("Flip search: grouped item×city = %d (after filters)", len(grp))
+        if grp.empty:
+            return []
+
+        # Build city→city pairs per item
+        left = grp[["item_id", "city", "buy", "updated"]].rename(
+            columns={"city": "buy_city", "buy": "buy", "updated": "updated_buy"}
+        )
+        right = grp[["item_id", "city", "sell", "updated"]].rename(
+            columns={"city": "sell_city", "sell": "sell", "updated": "updated_sell"}
+        )
+
+        pairs = left.merge(right, on="item_id", how="inner")
+        pairs = pairs[pairs["buy_city"] != pairs["sell_city"]]
+        pair_count = len(pairs)
+
+        pairs = pairs[pairs["buy"] > 0]
+        pairs["spread"] = (pairs["sell"] - pairs["buy"]).clip(lower=0)
+        pairs["roi_pct"] = (pairs["spread"] / pairs["buy"]) * 100.0
+        # guard against absurd ROI (e.g., stale bad quotes)
+        pairs = pairs.replace([np.inf, -np.inf], np.nan).dropna(subset=["roi_pct"])
+        pairs = pairs[pairs["roi_pct"] < 100000]  # 1e5% max cap
+
+        before_threshold = len(pairs)
+        if min_profit:
+            pairs = pairs[pairs["spread"] >= int(min_profit)]
+        if min_roi:
+            pairs = pairs[pairs["roi_pct"] >= float(min_roi)]
+        after_threshold = len(pairs)
+        log.info(
+            "Flip search: pairs computed = %d, candidates after thresholds = %d",
+            pair_count,
+            after_threshold,
+        )
+
+        if pairs.empty:
+            return []
+
+        pairs = pairs.sort_values(["roi_pct", "spread"], ascending=[False, False]).head(
+            int(max_results)
+        )
+
+        out = []
+        for r in pairs.itertuples(index=False):
+            raw_dt = r.updated_buy if pd.notna(r.updated_buy) else r.updated_sell
+            udt = _to_py_utc(raw_dt)
+            out.append(
+                {
+                    "item": r.item_id,
+                    "buy_city": r.buy_city,
+                    "sell_city": r.sell_city,
+                    "buy": int(r.buy),
+                    "sell": int(r.sell),
+                    "spread": int(r.spread),
+                    "roi_pct": float(r.roi_pct),
+                    "updated_dt": udt,
+                    "updated": rel_age(udt) if udt else "",
+                }
+            )
+        return out
+    except ImportError:
+        return compute_flips_py(
+            rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours
+        )
 
 
 def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours):
@@ -226,7 +228,7 @@ def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, 
     )
 
     def recent(dt):
-        dtv = _to_dt(dt)
+        dtv = _to_py_utc(dt)
         if dtv is None:
             return False
         if max_age_hours <= 0:
@@ -254,8 +256,8 @@ def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, 
         if s > 0 and s < best_sell[it][c]:
             best_sell[it][c] = s
         prev = updated[it][c]
-        u = r.get("updated_dt")
-        if prev is None or (_to_dt(u) and _to_dt(prev) and _to_dt(u) > _to_dt(prev)):
+        u = _to_py_utc(r.get("updated_dt"))
+        if prev is None or (u and prev and u > prev):
             updated[it][c] = u
 
     out = []
@@ -282,15 +284,7 @@ def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, 
                 if roi < float(min_roi):
                     continue
                 u = updated[it][cb] or updated[it].get(cs)
-                age = ""
-                udt = _to_dt(u)
-                if udt:
-                    secs = (datetime.now(timezone.utc) - udt).total_seconds()
-                    age = (
-                        f"{int(secs)}s"
-                        if secs < 60
-                        else (f"{int(secs // 60)}m" if secs < 3600 else f"{int(secs // 3600)}h")
-                    )
+                udt = u
                 out.append(
                     {
                         "item": it,
@@ -300,8 +294,8 @@ def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, 
                         "sell": se,
                         "spread": spread,
                         "roi_pct": roi,
-                        "updated_age": age,
-                        "updated_dt": u,
+                        "updated_dt": udt,
+                        "updated": rel_age(udt) if udt else "",
                     }
                 )
     after_threshold = len(out)
