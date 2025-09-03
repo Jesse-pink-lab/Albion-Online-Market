@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from utils.timefmt import to_utc, rel_age, fmt_tooltip
-from utils.items import parse_items
+from utils.items import parse_items, items_catalog_codes
 from PySide6.QtGui import QFont, QColor
 
 from engine.flips import FlipCalculator, FlipOpportunity
@@ -414,7 +414,18 @@ class FlipFinderWidget(QWidget):
         # Items
         cfg = self.main_window.get_config()
         raw = self.items_edit.text()
-        items = parse_items(raw, cfg.get('fetch_all_items', False))
+        typed = parse_items(raw)
+        if not typed and cfg.get('fetch_all_items', False):
+            items = list(items_catalog_codes())
+        else:
+            items = typed
+        self.logger.info(
+            "Item selection: typed=%d fetch_all=%s final=%d",
+            len(typed),
+            cfg.get('fetch_all_items', False),
+            len(items),
+        )
+        self.logger.debug("Items(head 12): %s", items[:12])
         if items:
             params['items'] = items
         

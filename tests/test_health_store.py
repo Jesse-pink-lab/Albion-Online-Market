@@ -3,6 +3,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import types
 from core.health import health_store, ping_aodp
+import datasources.aodp_url as aurl
 
 
 class DummyResp:
@@ -14,13 +15,14 @@ class DummyResp:
             raise Exception("error")
 
 
-def test_health_requires_three_failures():
+def test_health_requires_three_failures(monkeypatch):
     statuses = [500, 500, 500]
 
     def fake_get(url, timeout=None):
         return DummyResp(statuses.pop(0))
 
     session = types.SimpleNamespace(get=fake_get)
+    monkeypatch.setattr(aurl, "base_for", lambda s: s)
     health_store.aodp_online = True
     health_store.fail_count = 0
     ping_aodp("http://x", session)
@@ -31,13 +33,14 @@ def test_health_requires_three_failures():
     assert not health_store.aodp_online
 
 
-def test_health_429_is_online():
+def test_health_429_is_online(monkeypatch):
     statuses = [429]
 
     def fake_get(url, timeout=None):
         return DummyResp(statuses.pop(0))
 
     session = types.SimpleNamespace(get=fake_get)
+    monkeypatch.setattr(aurl, "base_for", lambda s: s)
     health_store.aodp_online = False
     health_store.fail_count = 5
     ping_aodp("http://x", session)
