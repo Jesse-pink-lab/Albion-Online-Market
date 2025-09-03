@@ -4,14 +4,56 @@ from typing import List, Dict, Sequence, Optional
 from datetime import datetime, timezone
 import math
 import logging
+import numpy as np
 
 log = logging.getLogger(__name__)
+
+
+def _coerce_datetime_series(s):
+    import pandas as pd
+    # First, try generic parse (handles ISO/Timestamp/None)
+    dt = pd.to_datetime(s, utc=True, errors="coerce")
+
+    # For entries still NaT, try numeric epoch seconds
+    mask = dt.isna()
+    if mask.any():
+        num = pd.to_numeric(s[mask], errors="coerce")
+        dt_s = pd.to_datetime(num, unit="s", utc=True, errors="coerce")
+        dt = dt.mask(mask, dt_s)
+
+    # For entries still NaT, try ms
+    mask = dt.isna()
+    if mask.any():
+        num = pd.to_numeric(s[mask], errors="coerce")
+        dt_ms = pd.to_datetime(num, unit="ms", utc=True, errors="coerce")
+        dt = dt.mask(mask, dt_ms)
+
+    # For entries still NaT, try µs
+    mask = dt.isna()
+    if mask.any():
+        num = pd.to_numeric(s[mask], errors="coerce")
+        dt_us = pd.to_datetime(num, unit="us", utc=True, errors="coerce")
+        dt = dt.mask(mask, dt_us)
+
+    return dt
 
 
 def _to_dt(x):
     from datetime import datetime, timezone
     if isinstance(x, datetime):
         return x if x.tzinfo else x.replace(tzinfo=timezone.utc)
+    if isinstance(x, (int, float)):
+        if isinstance(x, float) and math.isnan(x):
+            return None
+        v = int(x)
+        try:
+            if v > 10_000_000_000_000:  # µs
+                return datetime.fromtimestamp(v / 1_000_000, tz=timezone.utc)
+            if v > 10_000_000_000:  # ms
+                return datetime.fromtimestamp(v / 1_000, tz=timezone.utc)
+            return datetime.fromtimestamp(v, tz=timezone.utc)
+        except Exception:
+            return None
     if isinstance(x, str):
         s = x.rstrip("Z")
         try:
@@ -73,9 +115,14 @@ def compute_flips(
 
     # Age filter
     if max_age_hours and max_age_hours > 0:
-        dt = pd.to_datetime(df["updated_dt"].apply(_to_dt), utc=True)
+        dt = _coerce_datetime_series(df["updated_dt"])
         cutoff = pd.Timestamp.utcnow() - pd.Timedelta(hours=max_age_hours)
         df = df[dt >= cutoff]
+    df = df.copy()
+    df["udt"] = _coerce_datetime_series(df["updated_dt"])
+    # clean numeric columns and drop zeros/negatives
+    df["buy_price_max"] = pd.to_numeric(df["buy_price_max"], errors="coerce").fillna(0).astype(np.int64)
+    df["sell_price_min"] = pd.to_numeric(df["sell_price_min"], errors="coerce").fillna(0).astype(np.int64)
 
     if df.empty:
         return []
@@ -84,11 +131,13 @@ def compute_flips(
     grp = df.groupby(["item_id", "city"], as_index=False).agg(
         buy=("buy_price_max", "max"),
         sell=("sell_price_min", "min"),
-        updated=("updated_dt", "max"),
+        updated=("udt", "max"),
         qual=("quality", "max"),
     )
 
+    # Drop zeros and non-sense
     grp = grp[(grp["buy"] > 0) | (grp["sell"] > 0)]
+    grp = grp[(grp["buy"] >= 0) & (grp["sell"] >= 0)]
     log.info("Flip search: grouped item×city = %d (after filters)", len(grp))
     if grp.empty:
         return []
@@ -108,6 +157,9 @@ def compute_flips(
     pairs = pairs[pairs["buy"] > 0]
     pairs["spread"] = (pairs["sell"] - pairs["buy"]).clip(lower=0)
     pairs["roi_pct"] = (pairs["spread"] / pairs["buy"]) * 100.0
+    # guard against absurd ROI (e.g., stale bad quotes)
+    pairs = pairs.replace([np.inf, -np.inf], np.nan).dropna(subset=["roi_pct"])
+    pairs = pairs[pairs["roi_pct"] < 100000]  # 1e5% max cap
 
     before_threshold = len(pairs)
     if min_profit:
@@ -152,8 +204,8 @@ def compute_flips(
                 "sell": int(r.sell),
                 "spread": int(r.spread),
                 "roi_pct": float(r.roi_pct),
-                "updated_age": rel(r.updated_buy if pd.notna(r.updated_buy) else r.updated_sell),
-                "updated_dt": str(r.updated_buy or r.updated_sell),
+                "updated_age": rel(r.updated_buy) if pd.notna(r.updated_buy) else rel(r.updated_sell),
+                "updated_dt": str(r.updated_buy if pd.notna(r.updated_buy) else r.updated_sell),
             }
         )
     return out
