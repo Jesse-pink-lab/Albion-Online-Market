@@ -1,4 +1,6 @@
-import logging, requests
+import logging
+import requests
+from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request
 from core.signals import signals
 
@@ -15,26 +17,33 @@ class HealthStore:
             log.info("Health change: aodp_online=%s", online)
             signals.health_changed.emit(self)
 
-store = HealthStore()
 
-def ping_aodp(active_server: str, session: requests.Session):
-    base = base_for(active_server)
+store = HealthStore()
+# Backwards compat alias for widgets importing health_store
+health_store = store
+
+
+def ping_aodp(server: str, session: requests.Session | None = None):
+    sess = session or get_shared_session()
+    base = base_for(server)
     url, params = build_prices_request(base, ["T4_BAG"], ["Lymhurst"], "1")
     try:
-        r = session.get(url, params=params, timeout=(3,5))
-        code = r.status_code
-        if code == 429:
+        r = sess.get(url, params=params, timeout=(3, 5))
+        if r.status_code == 429:
             store._fails = 0
-            store.set_online(True); return
-        if code == 200:
+            store.set_online(True)
+            return
+        if r.status_code == 200:
             _ = r.json()
             store._fails = 0
-            store.set_online(True); return
+            store.set_online(True)
+            return
         store._fails += 1
     except Exception:
         store._fails += 1
     if store._fails >= 3:
         store.set_online(False)
+
 
 def mark_online_on_data_success():
     store._fails = 0

@@ -48,7 +48,8 @@ class MarketPricesWidget(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Server:"))
         self.server_combo = QComboBox()
-        self.server_combo.addItems(["europe", "asia", "americas"])
+        # Use region keys expected by the data service
+        self.server_combo.addItems(["europe", "east", "west"])
         controls.addWidget(self.server_combo)
 
         controls.addWidget(QLabel("Cities:"))
@@ -182,7 +183,8 @@ class MarketPricesWidget(QWidget):
         cities = [i.text() for i in self.city_list.selectedItems()]
         qualities = [int(i.text()) for i in self.quality_list.selectedItems()]
         server = self.server_combo.currentText()
-        return {"server": server, "city": cities[0] if cities else "", "qualities": qualities}
+        # Return all selected cities rather than collapsing to the first
+        return {"server": server, "cities": cities, "qualities": qualities}
 
     def on_refresh_clicked(self) -> None:
         if self.refresh_running:
@@ -202,7 +204,8 @@ class MarketPricesWidget(QWidget):
         from gui.threads import RefreshWorker
 
         self._thread = QThread(self)
-        self._worker = RefreshWorker(params)
+        # Pass application settings so the worker can honour fetch_all_items
+        self._worker = RefreshWorker(params, settings=self.main_window.settings)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.on_refresh_progress)

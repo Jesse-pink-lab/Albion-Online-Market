@@ -8,12 +8,11 @@ import time
 from typing import List, Dict
 import requests
 
-from datasources.aodp import SESSION
+from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request, DEFAULT_CITIES
 from utils.params import qualities_to_csv, cities_to_list
 from utils.items import parse_items, items_catalog_codes
 from utils.timefmt import to_utc
-from core.health import mark_online_on_data_success
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +24,15 @@ def fetch_prices(
     items_edit_text: str,
     cities_sel,
     qual_sel,
-    session: requests.Session = SESSION,
+    session: requests.Session | None = None,
     settings=None,
     on_progress=None,
     cancel=lambda: False,
 ) -> List[Dict]:
     """Fetch raw price rows from AODP with chunking and backoff."""
+
+    if session is None:
+        session = get_shared_session()
 
     # 1) Items
     typed = parse_items(items_edit_text)
@@ -69,7 +71,7 @@ def fetch_prices(
             quals_csv,
             attempt,
         )
-        log.debug("AODP URL: %s params=%s", url, params)
+        log.info("AODP URL: %s params=%s", url, params)
         r = session.get(url, params=params, timeout=(5, 10))
         if r.status_code in (429, 500, 502, 503, 504):
             if attempt <= 4:
@@ -90,8 +92,6 @@ def fetch_prices(
             if on_progress:
                 on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
 
-    if results:
-        mark_online_on_data_success()
     return results
 
 
