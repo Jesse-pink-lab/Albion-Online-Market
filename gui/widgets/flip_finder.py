@@ -55,18 +55,17 @@ class FlipFinderWorker(QThread):
         try:
             self.progress.emit(10, "Preparing data...")
             rows = market_prices.LATEST_ROWS or []
-            needed = (
-                "item_id",
-                "city",
-                "quality",
-                "buy_price_max",
-                "sell_price_min",
-                "updated_dt",
-            )
             trimmed = [
-                {k: r.get(k) for k in needed}
+                {
+                    "item_id": r.get("item_id"),
+                    "city": r.get("city"),
+                    "quality": r.get("quality"),
+                    "buy_price_max": r.get("buy_max"),
+                    "sell_price_min": r.get("sell_min"),
+                    "updated_dt": r.get("updated_dt"),
+                }
                 for r in rows
-                if (r.get("buy_price_max") or 0) > 0 or (r.get("sell_price_min") or 0) > 0
+                if (r.get("buy_max") or 0) > 0 or (r.get("sell_min") or 0) > 0
             ]
             self.progress.emit(50, "Computing...")
             try:
@@ -284,11 +283,11 @@ class FlipFinderWidget(QWidget):
         
         # Results table
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(9)
+        self.results_table.setColumnCount(7)
         self.results_table.setIconSize(QSize(24, 24))
         self.results_table.verticalHeader().setDefaultSectionSize(28)
         self.results_table.setHorizontalHeaderLabels([
-            "Item", "Quality", "Strategy", "Route", "Profit", "ROI %", "Investment", "Risk", "Updated"
+            "Item", "Route", "Buy", "Sell", "Spread", "ROI %", "Updated"
         ])
         
         # Configure table
@@ -457,29 +456,24 @@ class FlipFinderWidget(QWidget):
 
             ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
 
-            quality_item = QTableWidgetItem("")
-            self.results_table.setItem(row, 1, quality_item)
-
-            strategy_item = QTableWidgetItem("N/A")
-            self.results_table.setItem(row, 2, strategy_item)
-
             route_item = QTableWidgetItem(f"{flip['buy_city']} → {flip['sell_city']}")
-            self.results_table.setItem(row, 3, route_item)
+            self.results_table.setItem(row, 1, route_item)
 
-            profit_item = QTableWidgetItem(f"{flip['spread']:,}")
-            profit_item.setData(Qt.UserRole, flip['spread'])
-            self.results_table.setItem(row, 4, profit_item)
+            buy_item = QTableWidgetItem(f"{flip['buy']:,}")
+            buy_item.setData(Qt.UserRole, flip['buy'])
+            self.results_table.setItem(row, 2, buy_item)
+
+            sell_item = QTableWidgetItem(f"{flip['sell']:,}")
+            sell_item.setData(Qt.UserRole, flip['sell'])
+            self.results_table.setItem(row, 3, sell_item)
+
+            spread_item = QTableWidgetItem(f"{flip['spread']:,}")
+            spread_item.setData(Qt.UserRole, flip['spread'])
+            self.results_table.setItem(row, 4, spread_item)
 
             roi_item = QTableWidgetItem(f"{flip['roi_pct']:.1f}%")
             roi_item.setData(Qt.UserRole, flip['roi_pct'])
             self.results_table.setItem(row, 5, roi_item)
-
-            investment_item = QTableWidgetItem(f"{flip['buy']:,}")
-            investment_item.setData(Qt.UserRole, flip['buy'])
-            self.results_table.setItem(row, 6, investment_item)
-
-            risk_item = QTableWidgetItem("")
-            self.results_table.setItem(row, 7, risk_item)
 
             udisp = flip.get("updated") or ""
             udt = flip.get("updated_dt")
@@ -490,7 +484,7 @@ class FlipFinderWidget(QWidget):
             updated_item = SortableTableWidgetItem(str(udisp))
             if isinstance(udt, datetime):
                 updated_item.setData(Qt.UserRole, int(udt.timestamp()))
-            self.results_table.setItem(row, 8, updated_item)
+            self.results_table.setItem(row, 6, updated_item)
 
         self.results_table.sortItems(5, Qt.DescendingOrder)
     
