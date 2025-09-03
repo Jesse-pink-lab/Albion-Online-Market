@@ -1,7 +1,7 @@
 import sys, pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
-import types
+import types, time
 
 from services.market_prices import fetch_prices
 
@@ -31,8 +31,12 @@ def test_backoff_and_merge(monkeypatch):
     def fake_get(url, params=None, timeout=None):
         return responses.pop(0)
 
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
     session = types.SimpleNamespace(get=fake_get)
     settings = types.SimpleNamespace(fetch_all_items=False)
-    rows = fetch_prices("europe", "A,B", ["Caerleon"], "1", session, settings)
+    rows = fetch_prices("europe", "A,B", "Caerleon", "1", session=session, settings=settings)
     assert {r["item_id"] for r in rows} == {"A", "B"}
+    assert sleeps == [0.5]
 

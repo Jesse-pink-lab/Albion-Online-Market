@@ -21,64 +21,43 @@ DEFAULT_QUALITIES = "1,2,3,4,5"  # include 5 (Masterpiece)
 
 
 def fetch_prices(
-    server: str,
-    items_edit_text: str,
+    server,
+    items_edit_text,
     cities_sel,
     qual_sel,
     session: requests.Session | None = None,
     settings=None,
     on_progress=None,
     cancel=lambda: False,
-) -> List[Dict]:
-    """Fetch raw price rows from AODP with chunking and backoff."""
-
-    if session is None:
-        session = get_shared_session()
-
-    # 1) Items
+    fetch_all: bool | None = None,
+):
+    sess = session or get_shared_session()
     typed = parse_items(items_edit_text)
-    items = (
-        list(items_catalog_codes())
-        if (not typed and getattr(settings, "fetch_all_items", False))
-        else typed
-    )
+    use_all = fetch_all if fetch_all is not None else bool(getattr(settings, "fetch_all_items", False))
+    items = list(items_catalog_codes()) if (not typed and use_all) else typed
     if not items:
-        log.info(
-            "No items to request (typed=%d, fetch_all=%s).",
-            len(typed),
-            getattr(settings, "fetch_all_items", False),
-        )
+        log.info("No items to request (typed=%d, fetch_all=%s).", len(typed), use_all)
         return []
 
-    # 2) Cities / qualities
     cities = cities_to_list(cities_sel, DEFAULT_CITIES)
     quals_csv = qualities_to_csv(qual_sel)
-
-    # 3) Chunking
-    chunk_size, max_workers = 150, 4
-    chunks = [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
-
     base = base_for(server)
+
+    chunk_size, max_workers = 150, 4
+    chunks = [items[i:i+chunk_size] for i in range(0, len(items), chunk_size)]
     results: List[Dict] = []
-    total = len(chunks)
 
     def pull(chunk, attempt=1):
         url, params = build_prices_request(base, chunk, cities, quals_csv)
         log.info(
             "AODP GET: base=%s items=%d cities=%d quals=%s attempt=%d",
-            base,
-            len(chunk),
-            len(cities),
-            quals_csv,
-            attempt,
+            base, len(chunk), len(cities), quals_csv, attempt,
         )
-        log.info("AODP URL: %s params=%s", url, params)
-        r = session.get(url, params=params, timeout=(5, 10))
-        if r.status_code in (429, 500, 502, 503, 504):
-            if attempt <= 4:
-                delay = 0.5 * (2 ** (attempt - 1))
-                time.sleep(delay)
-                return pull(chunk, attempt + 1)
+        log.debug("AODP URL: %s params=%s", url, params)
+        r = sess.get(url, params=params, timeout=(5,10))
+        if r.status_code in (429,500,502,503,504) and attempt <= 4:
+            time.sleep(0.5 * (2 ** (attempt-1)))
+            return pull(chunk, attempt+1)
         r.raise_for_status()
         data = r.json() or []
         log.info("AODP RESP: status=%s records=%d", r.status_code, len(data))
@@ -87,11 +66,9 @@ def fetch_prices(
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(pull, c) for c in chunks]
         for idx, fut in enumerate(as_completed(futs), 1):
-            if cancel():
-                break
+            if cancel(): break
             results.extend(fut.result())
-            if on_progress:
-                on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
+            if on_progress: on_progress(int(idx/len(chunks)*100), f"Fetched {idx}/{len(chunks)}")
 
     return results
 
@@ -110,17 +87,17 @@ def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
         roi = (spread / buy * 100.0) if buy > 0 else 0.0
 
         def ts(d):
-            try:
-                return to_utc(d)
-            except Exception:
-                return None
-
+            try: return to_utc(d)
+            except: return None
         sell_dt = ts(row.get("sell_price_min_date"))
-        buy_dt = ts(row.get("buy_price_max_date"))
+        buy_dt  = ts(row.get("buy_price_max_date"))
         best_dt = sell_dt or buy_dt
 
         prev = out.get(key)
-        if (not prev) or (best_dt and prev.get("updated_dt") and best_dt > prev["updated_dt"]):
+        keep = (prev is None)
+        if prev and best_dt:
+            keep = best_dt > prev["updated_dt"]
+        if keep:
             out[key] = {
                 "item_id": item,
                 "city": city,
@@ -131,17 +108,9 @@ def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
                 "roi_pct": roi,
                 "buy_city": city if buy else None,
                 "sell_city": city if sell else None,
-                "updated_dt": best_dt or to_utc("1970-01-01T00:00:00Z"),
+                "updated_dt": best_dt,
             }
-    norm = list(out.values())
-
-    summary = {
-        "last_update_utc": now_utc_iso(),
-        "records": len(norm),
-        "top_opportunities": top_opportunities(norm, limit=20),
-    }
-    signals.market_data_ready.emit(summary)
-    return norm
+    return list(out.values())
 
 
 def top_opportunities(rows: list[dict], limit: int = 20) -> list[dict]:
@@ -149,20 +118,27 @@ def top_opportunities(rows: list[dict], limit: int = 20) -> list[dict]:
     cands: list[dict] = []
     for r in rows:
         if (r.get("buy_price_max", 0) > 0) and (r.get("sell_price_min", 0) > 0) and r.get("spread", 0) > 0:
-            cands.append(
-                {
-                    "item": r["item_id"],
-                    "buy_city": r.get("buy_city") or r.get("city"),
-                    "buy_price": r["buy_price_max"],
-                    "sell_city": r.get("sell_city") or r.get("city"),
-                    "sell_price": r["sell_price_min"],
-                    "spread": r["spread"],
-                    "roi_pct": r["roi_pct"],
-                    "updated_dt": r["updated_dt"],
-                }
-            )
+            cands.append({
+                "item": r["item_id"],
+                "buy_city": r.get("buy_city") or r.get("city"),
+                "buy_price": r["buy_price_max"],
+                "sell_city": r.get("sell_city") or r.get("city"),
+                "sell_price": r["sell_price_min"],
+                "spread": r["spread"],
+                "roi_pct": r["roi_pct"],
+                "updated_dt": r["updated_dt"] or to_utc("1970-01-01T00:00:00Z"),
+            })
     cands.sort(key=lambda x: (x["roi_pct"], x["spread"]), reverse=True)
     return cands[:limit]
+
+
+def emit_summary(norm_rows: list[dict]):
+    summary = {
+        "last_update_utc": now_utc_iso(),
+        "records": len(norm_rows),
+        "top_opportunities": top_opportunities(norm_rows, 20),
+    }
+    signals.market_data_ready.emit(summary)
 
 
 __all__ = [
@@ -171,4 +147,5 @@ __all__ = [
     "DEFAULT_CITIES",
     "DEFAULT_QUALITIES",
     "top_opportunities",
+    "emit_summary",
 ]

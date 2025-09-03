@@ -29,7 +29,7 @@ class RefreshWorker(QObject):
         start = time.perf_counter()
         self.progress.emit(1, "Starting market refresh...")
         try:
-            from services.market_prices import fetch_prices, normalize_and_dedupe
+            from services.market_prices import fetch_prices, normalize_and_dedupe, emit_summary
             from datasources.http import get_shared_session
             from core.health import mark_online_on_data_success
 
@@ -51,7 +51,12 @@ class RefreshWorker(QObject):
             norm = normalize_and_dedupe(rows)
             if norm:
                 mark_online_on_data_success()
+            emit_summary(norm)
             elapsed = time.perf_counter() - start
+            log.info(
+                "Market refresh completed: items=%s records=%s elapsed=%.2fs",
+                len(norm), len(rows), elapsed,
+            )
             summary = {"items": len(norm), "records": len(rows)}
             self.finished.emit({"ok": True, "elapsed": elapsed, "result": summary})
         except Exception as e:  # pragma: no cover - unexpected errors

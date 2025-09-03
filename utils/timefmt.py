@@ -7,14 +7,7 @@ from typing import Union
 
 
 def to_utc(dt_or_str: Union[datetime, str]) -> datetime:
-    """Return ``datetime`` converted to UTC.
-
-    Parameters
-    ----------
-    dt_or_str:
-        Either a :class:`datetime` instance or an ISO8601 string.  Strings
-        may or may not include a ``Z`` timezone designator.
-    """
+    """Return ``datetime`` converted to UTC."""
 
     if isinstance(dt_or_str, datetime):
         dt = dt_or_str
@@ -27,32 +20,39 @@ def to_utc(dt_or_str: Union[datetime, str]) -> datetime:
     return dt
 
 
-def rel_age(utc_dt: datetime) -> str:
-    """Return a human friendly age for ``utc_dt`` relative to now."""
-
-    delta = datetime.now(timezone.utc) - utc_dt
-    seconds = int(delta.total_seconds())
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}m"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h"
-    days = hours // 24
-    return f"{days}d"
+def _to_dt(x):
+    """Best-effort conversion of ``x`` to an aware ``datetime`` in UTC."""
+    if isinstance(x, datetime):
+        return x if x.tzinfo else x.replace(tzinfo=timezone.utc)
+    if isinstance(x, str):
+        s = x.rstrip("Z")
+        try:
+            return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+        except Exception:  # pragma: no cover - defensive
+            return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc)
 
 
-def fmt_tooltip(utc_dt: datetime) -> str:
-    """Return formatted UTC timestamp suitable for tooltips.
+def rel_age(dt_like) -> str:
+    """Return a human friendly age for ``dt_like`` relative to now."""
 
-    The specification for the UI requires a slightly more human friendly
-    representation than :func:`datetime.isoformat`; the ``T`` separator is
-    replaced with a space, e.g. ``"2024-01-02 03:04:05Z"``.
-    """
+    dt = _to_dt(dt_like)
+    delta = datetime.now(timezone.utc) - dt
+    secs = int(delta.total_seconds())
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    return f"{hours}h"
 
-    return utc_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+def fmt_tooltip(dt_like) -> str:
+    """Return formatted UTC timestamp suitable for tooltips."""
+
+    dt = _to_dt(dt_like)
+    return dt.strftime("%Y-%m-%d %H:%M:%SZ")
 
 
 def now_utc_iso() -> str:
