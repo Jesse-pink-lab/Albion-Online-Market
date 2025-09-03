@@ -37,8 +37,8 @@ def test_api_status_tile(monkeypatch):
 
     monkeypatch.setattr(health, "ping_aodp", online_ping)
     w = DataManagerWidget(DummyMain())
-    assert w.lblApiStatus.text() == "Online"
-    assert w.api_status_card.value_label.text().startswith("🟢")
+    assert w.api_status_card.value_label.text() == "🟢 Online"
+    assert w.api_status_card.subtitle_label.text() == "AODP Connection"
 
     def offline_ping(server):
         store.set_online(False)
@@ -46,5 +46,5 @@ def test_api_status_tile(monkeypatch):
 
     monkeypatch.setattr(health, "ping_aodp", offline_ping)
     w.refreshApiStatus()
-    assert w.lblApiStatus.text() == "Offline"
-    assert w.api_status_card.value_label.text().startswith("🔴")
+    assert w.api_status_card.value_label.text() == "🔴 Offline"
+    assert w.api_status_card.subtitle_label.text() == "Check network / rate limits"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List
-from datetime import datetime
 
 from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import (
@@ -22,9 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from services.market_prices import fetch_prices
 from utils.timefmt import rel_age, fmt_tooltip
-from core.signals import signals
 
 
 class MarketPricesWidget(QWidget):
@@ -122,23 +119,6 @@ class MarketPricesWidget(QWidget):
         body.addWidget(side_widget, 1)
 
         layout.addLayout(body)
-
-    # ------------------------------------------------------------------
-    # Data handling
-    # ------------------------------------------------------------------
-    def load_prices(self, items: List[str]) -> None:
-        cities = [i.text() for i in self.city_list.selectedItems()]
-        qualities = [int(i.text()) for i in self.quality_list.selectedItems()]
-        server = self.server_combo.currentText()
-
-        try:
-            rows = fetch_prices(items, cities, qualities, server)
-        except Exception as exc:  # pragma: no cover - network errors
-            self.logger.error("Failed to fetch prices: %s", exc)
-            return
-
-        self.rows = rows
-        self.populate_table()
 
     def populate_table(self) -> None:
         self.table.setRowCount(len(self.rows))
@@ -243,14 +223,6 @@ class MarketPricesWidget(QWidget):
             payload.get("result", {}).get("records"),
             elapsed,
         )
-        summary = {
-            "last_update_utc": datetime.utcnow().isoformat() + "Z",
-            "records": payload.get("result", {}).get("records"),
-            "best_flip": None,
-            "best_craft": None,
-            "activity": None,
-        }
-        signals.market_data_ready.emit(summary)
         self._refresh_cleanup()
 
     def on_refresh_error(self, err: str) -> None:

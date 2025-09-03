@@ -20,6 +20,9 @@ def test_dashboard_updates():
     w = DashboardWidget()
     assert w.lblLastUpdate.text() == "Loading…"
 
+    updates: list[dict] = []
+    signals.market_data_ready.connect(lambda s: updates.append(s))
+
     dt = datetime.utcnow()
     summary = {
         "last_update_utc": now_utc_iso(),
@@ -40,6 +43,22 @@ def test_dashboard_updates():
     signals.market_data_ready.emit(summary)
     app.processEvents()
 
+    assert len(updates) == 1
     assert w.lblRecords.text() == "5"
     assert w.topTable.rowCount() == 1
     assert w.lblLastUpdate.text().endswith("ago")
+
+    from gui.widgets.market_prices import MarketPricesWidget
+
+    class DummyMain:
+        def set_status(self, msg):
+            pass
+
+        def set_refresh_enabled(self, flag):
+            pass
+
+    mpw = MarketPricesWidget(DummyMain())
+    mpw.on_refresh_done({"elapsed": 0, "result": {"items": 0, "records": 0}})
+    app.processEvents()
+
+    assert len(updates) == 1
