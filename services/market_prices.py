@@ -20,6 +20,9 @@ log = logging.getLogger(__name__)
 
 DEFAULT_QUALITIES = "1,2,3,4,5"  # include 5 (Masterpiece)
 
+# Cache of the latest normalized rows
+LATEST_ROWS: list[dict] = []
+
 # Conservative safety margin; many proxies reject > ~2000 bytes.
 MAX_URL_LEN = 1800
 
@@ -150,8 +153,7 @@ def fetch_prices(
     if failed:
         log.warning("Refresh completed with %d failed chunks (see logs)", failed)
     norm = normalize_and_dedupe(results)
-    signals.market_rows_updated.emit(norm)
-    emit_summary(norm)
+    on_fetch_completed(norm)
     return norm
 
 
@@ -223,6 +225,14 @@ def emit_summary(norm_rows: list[dict]):
     signals.market_data_ready.emit(summary)
 
 
+def on_fetch_completed(norm_rows: list[dict]):
+    """Cache and emit latest normalized rows."""
+    global LATEST_ROWS
+    LATEST_ROWS = norm_rows or []
+    signals.market_rows_updated.emit(LATEST_ROWS)
+    emit_summary(LATEST_ROWS)
+
+
 __all__ = [
     "fetch_prices",
     "normalize_and_dedupe",
@@ -230,4 +240,6 @@ __all__ = [
     "DEFAULT_QUALITIES",
     "top_opportunities",
     "emit_summary",
+    "on_fetch_completed",
+    "LATEST_ROWS",
 ]
