@@ -3,6 +3,8 @@ import os, hashlib, threading, requests
 from PySide6.QtCore import QObject, Signal, QThreadPool, QRunnable, Slot, QMetaObject, Qt
 from PySide6.QtGui import QPixmap
 from utils.icons import item_icon_url
+from services.netlimit import bucket
+from services.market_prices import _on_result
 
 
 class IconReady(QObject):
@@ -23,7 +25,9 @@ class _FetchTask(QRunnable):
                     QMetaObject.invokeMethod(self.signaler, "ready", Qt.QueuedConnection, 
                                              args=[self.url, pm])
                     return
+            bucket.acquire()
             r = requests.get(self.url, timeout=self.timeout)
+            _on_result(r.status_code)
             r.raise_for_status()
             os.makedirs(self.cache_dir, exist_ok=True)
             with open(path, "wb") as f: f.write(r.content)

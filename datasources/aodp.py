@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import json
 import requests
 from datasources.aodp_url import base_for, build_prices_request
+from services.netlimit import bucket
+from services.market_prices import _on_result
 
 # ---------------------------------------------------------------------------
 # Shared session used by higher level services.  Tests rely on predictable
@@ -94,7 +96,9 @@ class AODPClient:
         self._enforce_rate_limit()
         try:
             self.logger.debug(f"Making request to {url} with params {params}")
+            bucket.acquire()
             response = self.session.get(url, params=params, timeout=self.timeout)
+            _on_result(response.status_code)
             response.raise_for_status()
             data = response.json()
             self.logger.debug(

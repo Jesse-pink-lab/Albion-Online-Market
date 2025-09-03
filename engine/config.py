@@ -146,6 +146,12 @@ class ConfigManager:
             'premium_enabled': True,
             'fetch_all_items': True,
             'items_per_request': 150,
+            'max_concurrency': 4,
+            'global_rate_per_sec': 2.0,
+            'global_rate_capacity': 4,
+            'cache_ttl_sec': 120,
+            'city_batch_size': 3,
+            'only_visible_first': True,
             'risk': {
                 'caerleon_high_risk': True
             },

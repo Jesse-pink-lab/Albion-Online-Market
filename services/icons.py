@@ -6,6 +6,8 @@ import os, io, threading
 import requests
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtCore import QObject, Signal, QThreadPool, QRunnable, Slot
+from services.netlimit import bucket
+from services.market_prices import _on_result
 from platformdirs import user_cache_dir
 
 ICON_BASE = "https://render.albiononline.com/v1/item"  # e.g. /T4_SWORD.png?quality=3
@@ -43,7 +45,9 @@ class _FetchTask(QRunnable):
     @Slot()
     def run(self):
         try:
+            bucket.acquire()
             r = requests.get(self.url, timeout=15)
+            _on_result(r.status_code)
             r.raise_for_status()
             data = r.content
             # write once

@@ -3,6 +3,8 @@ import requests
 from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request
 from core.signals import signals
+from services.netlimit import bucket
+from services.market_prices import _on_result
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +30,10 @@ def ping_aodp(server: str):
     base = base_for(server)
     url, params = build_prices_request(base, ["T4_BAG"], ["Lymhurst"], "1")
     try:
+        bucket.acquire()
         r = sess.get(url, params=params, timeout=(3, 5))
         code = r.status_code
+        _on_result(code)
         if code == 429 or code == 200:
             _ = r.json() if code == 200 else None
             store._fails = 0

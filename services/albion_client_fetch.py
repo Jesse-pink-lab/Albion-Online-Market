@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Callable
 
 import requests
+from services.netlimit import bucket
+from services.market_prices import _on_result
 
 from logging_config import get_logger
 from utils.pecheck import is_valid_win64_exe
@@ -78,7 +80,9 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
     dest = Path(dest_exe_path)
     try:
         log.info("Fetching latest Albion Data Client release info")
+        bucket.acquire()
         resp = requests.get(GITHUB_API_LATEST, timeout=30)
+        _on_result(getattr(resp, "status_code", 200))
         resp.raise_for_status()
         release = resp.json()
     except Exception as exc:
@@ -94,7 +98,9 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
     log.info("Chosen asset %s (%s)", name, url)
 
     try:
+        bucket.acquire()
         dl_resp = requests.get(url, timeout=60)
+        _on_result(getattr(dl_resp, "status_code", 200))
         dl_resp.raise_for_status()
         data = dl_resp.content
     except Exception as exc:
