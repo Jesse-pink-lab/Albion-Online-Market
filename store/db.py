@@ -5,7 +5,6 @@ Handles database initialization, connections, and data access operations.
 """
 
 import logging
-from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
@@ -14,6 +13,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from .models import Base, Price, Scan, Flip, CraftPlan, ActivityScore, AppSettings
+from utils.paths import DB_PATH
 
 
 class DatabaseManager:
@@ -24,12 +24,8 @@ class DatabaseManager:
         self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Get database path from config
-        db_path = config.get('database', {}).get('path', 'data/albion_trade.db')
-        self.db_path = Path(db_path)
-
-        # Ensure database directory exists
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Use shared database path
+        self.db_path = DB_PATH
         
         # Create database URL
         self.db_url = f"sqlite:///{self.db_path}"

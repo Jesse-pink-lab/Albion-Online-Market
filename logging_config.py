@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-from platformdirs import user_log_dir
+from utils.paths import LOG_DIR
 
 _LOG_CONFIGURED = False
 
@@ -14,23 +12,13 @@ FORMAT = (
 )
 
 
-def _log_dir() -> Path:
-    if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        path = base / "AlbionTradeOptimizer" / "logs"
-    else:
-        path = Path(user_log_dir("AlbionTradeOptimizer"))
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def get_logger(name: str) -> logging.Logger:
     """Return a logger configured for the application."""
     global _LOG_CONFIGURED
     if not _LOG_CONFIGURED:
-        log_dir = _log_dir()
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
-            log_dir / "app.log", maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8"
+            LOG_DIR / "app.log", maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(FORMAT))

@@ -24,3 +24,16 @@ Writes are atomic to prevent corruption. When overriding uploader binaries, path
 ## Packaging
 
 `build.py` generates a PyInstaller bundle that includes the uploader binaries, license, and required data files.
+
+## Windows Installer
+
+**Prerequisites:** Python 3.11+, PyInstaller, and [Inno Setup](https://jrsoftware.org/isinfo.php) with `ISCC.exe` on your `PATH`.
+
+**Build steps:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build_installer.ps1
+```
+
+The installer is created under `dist\installer`. User data (logs, database, and `config.yaml`) persist across upgrades at:
+`%APPDATA%\AlbionTradeOptimizer\{logs|data|config.yaml}`.
