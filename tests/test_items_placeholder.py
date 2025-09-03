@@ -1,20 +1,37 @@
-import sys, pathlib
+import sys, pathlib, types
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
-from utils.items import parse_items, items_catalog_codes
+from services.market_prices import fetch_prices
 
 
-def test_items_placeholder_not_used():
-    assert parse_items("") == []
+class DummyResp:
+    def __init__(self, status, data=None):
+        self.status_code = status
+        self._data = data or []
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception("error")
+    def json(self):
+        return self._data
 
 
-def test_items_fetch_all():
-    catalog = items_catalog_codes()
-    items = parse_items("")
-    items = catalog if (not items and True) else items
-    assert items == catalog and len(items) > 0
+def test_empty_items_fetch_all(monkeypatch):
+    calls = []
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        return DummyResp(200, [])
+    session = types.SimpleNamespace(get=fake_get)
+    monkeypatch.setattr('services.market_prices.items_catalog_codes', lambda: ['A','B'])
+    rows = fetch_prices('europe', '', '', '', session=session, fetch_all=True)
+    assert calls and rows == []
 
 
-def test_items_non_empty():
-    assert parse_items("t4_bag") == ["T4_BAG"]
+def test_empty_items_no_fetch(monkeypatch):
+    calls = []
+    def fake_get(url, params=None, timeout=None):
+        calls.append(url)
+        return DummyResp(200, [])
+    session = types.SimpleNamespace(get=fake_get)
+    rows = fetch_prices('europe', '', '', '', session=session, fetch_all=False)
+    assert rows == [] and calls == []
 
