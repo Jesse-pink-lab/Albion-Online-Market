@@ -9,4 +9,5 @@ def test_qualities_to_csv_label():
 
 
 def test_qualities_to_csv_all():
-    assert qualities_to_csv('All') == '1,2,3,4'
+    assert qualities_to_csv('All') == '1,2,3,4,5'
+

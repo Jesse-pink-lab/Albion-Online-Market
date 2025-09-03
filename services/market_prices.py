@@ -1,186 +1,138 @@
-"""Market price fetching utilities with batching and backoff.
-
-This module provides a small wrapper around the Albion Online Data
-Project API.  The real application performs far more work but for the
-tests we focus on request construction, basic error handling and the
-normalisation of returned records.
-"""
+"""Market price fetching utilities with batching and backoff."""
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import time
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
-
+from typing import List, Dict
 import requests
 
 from datasources.aodp import SESSION
-from datasources.aodp_url import (
-    base_for,
-    build_prices_url as _build_prices_url,
-    DEFAULT_CITIES,
-)
+from datasources.aodp_url import base_for, build_prices_request, DEFAULT_CITIES
+from utils.params import qualities_to_csv, cities_to_list
+from utils.items import parse_items, items_catalog_codes
 from utils.timefmt import to_utc
+from core.health import mark_online_on_data_success
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
-# Default locations and qualities when the UI fields are empty
-DEFAULT_QUALITIES = [1, 2, 3, 4]
-
-
-def build_prices_url(
-    server: str,
-    items: Iterable[str],
-    locations: Iterable[str],
-    qualities: Iterable[int],
-) -> str:
-    """Construct the prices endpoint URL for the given arguments."""
-
-    base = base_for(server)
-    items_str = ",".join(items)
-    locs = ",".join(locations)
-    quals = ",".join(str(q) for q in qualities)
-    return _build_prices_url(base, items_str, locs, quals)
-
-
-def _fetch_chunk(url: str, session: requests.Session) -> List[Dict[str, object]]:
-    """Fetch a single chunk with exponential backoff."""
-
-    delays = [0.5, 1, 2, 4]
-    for attempt, delay in enumerate(delays, start=1):
-        logger.debug("Fetching %s attempt=%s", url, attempt)
-        resp = session.get(url, timeout=(5, 10))
-        if resp.status_code in {429} or resp.status_code >= 500:
-            logger.warning("AODP backoff: attempt=%d status=%s", attempt, resp.status_code)
-            if attempt == len(delays):
-                logger.info("AODP RESP: status=%s records=%d", resp.status_code, 0)
-                resp.raise_for_status()
-            time.sleep(delay)
-            continue
-        resp.raise_for_status()
-        data = resp.json()
-        logger.info("AODP RESP: status=%s records=%d", resp.status_code, len(data))
-        return data
-    return []  # pragma: no cover - should never reach
+DEFAULT_QUALITIES = "1,2,3,4,5"  # include 5 (Masterpiece)
 
 
 def fetch_prices(
-    item_ids: Iterable[str],
-    locations: Optional[Iterable[str]] = None,
-    qualities: Optional[Iterable[int]] = None,
-    server: str = "europe",
-    chunk_size: int = 150,
+    server: str,
+    items_edit_text: str,
+    cities_sel,
+    qual_sel,
     session: requests.Session = SESSION,
-) -> List[Dict[str, object]]:
-    """Fetch and normalise market prices.
+    settings=None,
+    on_progress=None,
+    cancel=lambda: False,
+) -> List[Dict]:
+    """Fetch raw price rows from AODP with chunking and backoff."""
 
-    The function handles chunking and merges the results into a per item
-    summary consisting of the best bid/ask information as well as simple
-    spread/ROI calculations.
-    """
-
-    items = list(item_ids)
+    # 1) Items
+    typed = parse_items(items_edit_text)
+    items = (
+        list(items_catalog_codes())
+        if (not typed and getattr(settings, "fetch_all_items", False))
+        else typed
+    )
     if not items:
+        log.info(
+            "No items to request (typed=%d, fetch_all=%s).",
+            len(typed),
+            getattr(settings, "fetch_all_items", False),
+        )
         return []
 
-    locs = list(locations) if locations else list(DEFAULT_CITIES)
-    quals = list(qualities) if qualities else list(DEFAULT_QUALITIES)
+    # 2) Cities / qualities
+    cities = cities_to_list(cities_sel, DEFAULT_CITIES)
+    quals_csv = qualities_to_csv(qual_sel)
+
+    # 3) Chunking
+    chunk_size, max_workers = 150, 4
+    chunks = [items[i : i + chunk_size] for i in range(0, len(items), chunk_size)]
 
     base = base_for(server)
-    quals_csv = ",".join(str(q) for q in quals)
+    results: List[Dict] = []
+    total = len(chunks)
 
-    raw_records: List[Dict[str, object]] = []
-    for i in range(0, len(items), chunk_size):
-        chunk = items[i : i + chunk_size]
-        items_csv = ",".join(chunk)
-        cities_csv = ",".join(locs)
-        url = _build_prices_url(base, items_csv, cities_csv, quals_csv)
-        logger.info(
-            "AODP GET: base=%s items=%d cities=%d quals=%s",
+    def pull(chunk, attempt=1):
+        url, params = build_prices_request(base, chunk, cities, quals_csv)
+        log.info(
+            "AODP GET: base=%s items=%d cities=%d quals=%s attempt=%d",
             base,
             len(chunk),
-            len(locs),
+            len(cities),
             quals_csv,
+            attempt,
         )
-        logger.debug("AODP URL: %s", url)
-        data = _fetch_chunk(url, session)
-        raw_records.extend(data)
+        log.debug("AODP URL: %s params=%s", url, params)
+        r = session.get(url, params=params, timeout=(5, 10))
+        if r.status_code in (429, 500, 502, 503, 504):
+            if attempt <= 4:
+                delay = 0.5 * (2 ** (attempt - 1))
+                time.sleep(delay)
+                return pull(chunk, attempt + 1)
+        r.raise_for_status()
+        data = r.json() or []
+        log.info("AODP RESP: status=%s records=%d", r.status_code, len(data))
+        return data
 
-    return [normalize_item(item_id, recs) for item_id, recs in _group_by_item(raw_records).items()]
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futs = [ex.submit(pull, c) for c in chunks]
+        for idx, fut in enumerate(as_completed(futs), 1):
+            if cancel():
+                break
+            results.extend(fut.result())
+            if on_progress:
+                on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
+
+    if results:
+        mark_online_on_data_success()
+    return results
 
 
-def _group_by_item(records: List[Dict[str, object]]) -> Dict[str, List[Dict[str, object]]]:
-    grouped: Dict[str, List[Dict[str, object]]] = {}
-    for rec in records:
-        grouped.setdefault(rec.get("item_id"), []).append(rec)
-    return grouped
+def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
+    out: Dict[tuple, Dict] = {}
+    for row in rows:
+        item = row.get("item_id")
+        city = row.get("city")
+        quality = int(row.get("quality") or 1)
+        key = (item, city, quality)
 
+        buy = int(row.get("buy_price_max") or 0)
+        sell = int(row.get("sell_price_min") or 0)
+        spread = max(sell - buy, 0)
+        roi = (spread / buy * 100.0) if buy > 0 else 0.0
 
-@dataclass
-class Normalized:
-    item_id: str
-    buy_price_max: Optional[int]
-    buy_city: Optional[str]
-    buy_date: Optional[object]
-    sell_price_min: Optional[int]
-    sell_city: Optional[str]
-    sell_date: Optional[object]
-    spread: Optional[int]
-    roi_pct: Optional[float]
+        def ts(d):
+            try:
+                return to_utc(d)
+            except Exception:
+                return None
 
+        sell_dt = ts(row.get("sell_price_min_date"))
+        buy_dt = ts(row.get("buy_price_max_date"))
+        best_dt = sell_dt or buy_dt
 
-def normalize_item(item_id: str, records: List[Dict[str, object]]) -> Dict[str, object]:
-    """Normalise API records for a single item."""
-
-    best_buy = {"price": None, "city": None, "date": None}
-    best_sell = {"price": None, "city": None, "date": None}
-
-    for rec in records:
-        buy = rec.get("buy_price_max")
-        sell = rec.get("sell_price_min")
-        city = rec.get("city")
-        buy_date = rec.get("buy_price_max_date")
-        sell_date = rec.get("sell_price_min_date")
-
-        if buy is not None and (best_buy["price"] is None or buy > best_buy["price"]):
-            best_buy = {
-                "price": buy,
+        prev = out.get(key)
+        if (not prev) or (best_dt and prev.get("updated_dt") and best_dt > prev["updated_dt"]):
+            out[key] = {
+                "item_id": item,
                 "city": city,
-                "date": to_utc(buy_date) if buy_date else None,
+                "quality": quality,
+                "buy_price_max": buy,
+                "sell_price_min": sell,
+                "spread": spread,
+                "roi_pct": roi,
+                "buy_city": city if buy else None,
+                "sell_city": city if sell else None,
+                "updated_dt": best_dt or to_utc("1970-01-01T00:00:00Z"),
             }
-        if sell is not None and (best_sell["price"] is None or sell < best_sell["price"]):
-            best_sell = {
-                "price": sell,
-                "city": city,
-                "date": to_utc(sell_date) if sell_date else None,
-            }
-
-    spread = None
-    roi = None
-    if best_buy["price"] is not None and best_sell["price"] is not None:
-        spread = best_sell["price"] - best_buy["price"]
-        if best_buy["price"]:
-            roi = (spread / best_buy["price"]) * 100
-
-    return {
-        "item_id": item_id,
-        "buy_price_max": best_buy["price"],
-        "buy_city": best_buy["city"],
-        "buy_date": best_buy["date"],
-        "sell_price_min": best_sell["price"],
-        "sell_city": best_sell["city"],
-        "sell_date": best_sell["date"],
-        "spread": spread,
-        "roi_pct": roi,
-    }
+    return list(out.values())
 
 
-__all__ = [
-    "fetch_prices",
-    "build_prices_url",
-    "normalize_item",
-    "DEFAULT_CITIES",
-    "DEFAULT_QUALITIES",
-]
-
+__all__ = ["fetch_prices", "normalize_and_dedupe", "DEFAULT_CITIES", "DEFAULT_QUALITIES"]

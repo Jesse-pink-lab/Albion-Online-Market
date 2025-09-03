@@ -22,14 +22,17 @@ class DummyResp:
 def test_backoff_and_merge(monkeypatch):
     responses = [
         DummyResp(429),
-        DummyResp(200, [{"item_id": "A", "city": "Caerleon", "sell_price_min": 10, "buy_price_max": 5}]),
-        DummyResp(200, [{"item_id": "B", "city": "Caerleon", "sell_price_min": 12, "buy_price_max": 6}]),
+        DummyResp(200, [
+            {"item_id": "A", "city": "Caerleon", "sell_price_min": 10, "buy_price_max": 5},
+            {"item_id": "B", "city": "Caerleon", "sell_price_min": 12, "buy_price_max": 6},
+        ]),
     ]
 
-    def fake_get(url, timeout=None):
+    def fake_get(url, params=None, timeout=None):
         return responses.pop(0)
 
     session = types.SimpleNamespace(get=fake_get)
-    items = ["A", "B"]
-    rows = fetch_prices(items, ["Caerleon"], [1], "europe", chunk_size=1, session=session)
+    settings = types.SimpleNamespace(fetch_all_items=False)
+    rows = fetch_prices("europe", "A,B", ["Caerleon"], "1", session, settings)
     assert {r["item_id"] for r in rows} == {"A", "B"}
+
