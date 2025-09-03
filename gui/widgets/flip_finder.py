@@ -413,21 +413,19 @@ class FlipFinderWidget(QWidget):
         
         # Items
         cfg = self.main_window.get_config()
+        fetch_all = bool(cfg.get('fetch_all_items', False))
         raw = self.items_edit.text()
         typed = parse_items(raw)
-        if not typed and cfg.get('fetch_all_items', False):
-            items = list(items_catalog_codes())
-        else:
-            items = typed
+        catalog = list(items_catalog_codes())
+        items = catalog if (not typed and fetch_all) else typed
         self.logger.info(
-            "Item selection: typed=%d fetch_all=%s final=%d",
-            len(typed),
-            cfg.get('fetch_all_items', False),
-            len(items),
+            "Item selection: catalog=%d typed=%d fetch_all=%s -> final=%d",
+            len(catalog), len(typed), fetch_all, len(items),
         )
         self.logger.debug("Items(head 12): %s", items[:12])
         if items:
             params['items'] = items
+        params['fetch_all'] = fetch_all
         
         # Cities
         cities_selection = self.cities_combo.currentText()

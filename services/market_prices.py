@@ -34,7 +34,12 @@ def fetch_prices(
     sess = session or get_shared_session()
     typed = parse_items(items_edit_text)
     use_all = fetch_all if fetch_all is not None else bool(getattr(settings, "fetch_all_items", False))
-    items = list(items_catalog_codes()) if (not typed and use_all) else typed
+    catalog = list(items_catalog_codes())
+    items = catalog if (not typed and use_all) else typed
+    log.info(
+        "Item selection: catalog=%d typed=%d fetch_all=%s -> final=%d",
+        len(catalog), len(typed), use_all, len(items),
+    )
     if not items:
         log.info("No items to request (typed=%d, fetch_all=%s).", len(typed), use_all)
         return []
