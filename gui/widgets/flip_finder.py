@@ -15,12 +15,29 @@ from PySide6.QtWidgets import (
     QProgressBar, QFrame, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
+
+from services.icons import ICON_PROVIDER
+from utils.timefmt import rel_age
+import pandas as pd
+from datetime import datetime
 
 from services.flip_engine import compute_flips
 from services import market_prices
 
 log = logging.getLogger(__name__)
+
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    """Table item that sorts by Qt.UserRole if available."""
+
+    def __lt__(self, other):  # type: ignore[override]
+        if isinstance(other, QTableWidgetItem):
+            sd = self.data(Qt.UserRole)
+            od = other.data(Qt.UserRole)
+            if sd is not None and od is not None:
+                return sd < od
+        return super().__lt__(other)
 
 
 class FlipFinderWorker(QThread):
@@ -430,15 +447,15 @@ class FlipFinderWidget(QWidget):
         self.results_table.setRowCount(len(flips))
 
         for row, flip in enumerate(flips):
-            item_item = QTableWidgetItem(flip["item"])
-            prov = self.main_window.icon_provider
-            def cb(pm, item=item_item):
-                if not pm.isNull():
-                    item.setIcon(QIcon(pm))
-            pm = prov.get(flip["item"], flip.get("quality"), 24, cb)
-            if not pm.isNull():
-                item_item.setIcon(QIcon(pm))
-            self.results_table.setItem(row, 0, item_item)
+            item_id = flip.get("item") or flip.get("item_id", "")
+            quality = flip.get("quality")
+            item_cell = QTableWidgetItem(item_id)
+            self.results_table.setItem(row, 0, item_cell)
+
+            def _apply_icon(icon, cell=item_cell):
+                cell.setIcon(icon)
+
+            ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
 
             quality_item = QTableWidgetItem("")
             self.results_table.setItem(row, 1, quality_item)
@@ -461,10 +478,18 @@ class FlipFinderWidget(QWidget):
             investment_item.setData(Qt.UserRole, flip['buy'])
             self.results_table.setItem(row, 6, investment_item)
 
-            risk_item = QTableWidgetItem(flip.get('updated_age', ''))
+            risk_item = QTableWidgetItem("")
             self.results_table.setItem(row, 7, risk_item)
 
-            updated_item = QTableWidgetItem(flip.get('updated_dt', ''))
+            udisp = flip.get("updated") or ""
+            udt = flip.get("updated_dt")
+            if not udisp and isinstance(udt, (datetime, pd.Timestamp)):
+                if isinstance(udt, pd.Timestamp):
+                    udt = udt.to_pydatetime()
+                udisp = rel_age(udt)
+            updated_item = SortableTableWidgetItem(str(udisp))
+            if isinstance(udt, datetime):
+                updated_item.setData(Qt.UserRole, int(udt.timestamp()))
             self.results_table.setItem(row, 8, updated_item)
 
         self.results_table.sortItems(5, Qt.DescendingOrder)
@@ -488,7 +513,7 @@ class FlipFinderWidget(QWidget):
             f"Sell: {flip['sell']}\n"
             f"Profit: {flip['spread']}\n"
             f"ROI: {flip['roi_pct']:.1f}%\n"
-            f"Updated: {flip.get('updated_dt','')} ({flip.get('updated_age','')} ago)"
+            f"Updated: {flip.get('updated') or ''}"
         )
         self.details_text.setPlainText(details)
     

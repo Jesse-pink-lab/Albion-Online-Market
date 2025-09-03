@@ -6,7 +6,8 @@ import logging
 from typing import Any, Dict, List
 
 from PySide6.QtCore import Qt, QThread, QSize
-from PySide6.QtGui import QIcon
+
+from services.icons import ICON_PROVIDER
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -125,15 +126,15 @@ class MarketPricesWidget(QWidget):
     def populate_table(self) -> None:
         self.table.setRowCount(len(self.rows))
         for row_index, row in enumerate(self.rows):
-            item_item = QTableWidgetItem(row["item_id"])
-            prov = self.main_window.icon_provider
-            def cb(pm, item=item_item):
-                if not pm.isNull():
-                    item.setIcon(QIcon(pm))
-            pm = prov.get(row["item_id"], row.get("quality"), 24, cb)
-            if not pm.isNull():
-                item_item.setIcon(QIcon(pm))
+            item_id = row.get("item_id", "")
+            quality = row.get("quality")
+            item_item = QTableWidgetItem(item_id)
             self.table.setItem(row_index, 0, item_item)
+
+            def _apply_icon(icon, cell=item_item):
+                cell.setIcon(icon)
+
+            ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
             route = f"{row.get('buy_city') or '-'} → {row.get('sell_city') or '-'}"
             self.table.setItem(row_index, 1, QTableWidgetItem(route))
             self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_price_max"))))
