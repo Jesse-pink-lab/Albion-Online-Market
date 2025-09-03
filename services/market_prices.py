@@ -8,6 +8,7 @@ import time
 from typing import List, Dict
 from urllib.parse import urlencode
 import requests
+from requests import HTTPError
 
 from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request, DEFAULT_CITIES
@@ -137,19 +138,35 @@ def fetch_prices(
         return data
 
     failed = 0
+    failed_chunks: list[list[str]] = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futs = [ex.submit(pull, c) for c in chunks]
-        total = len(futs)
-        for idx, fut in enumerate(as_completed(futs), 1):
+        future_to_chunk = {ex.submit(pull, c): c for c in chunks}
+        total = len(future_to_chunk)
+        for idx, fut in enumerate(as_completed(future_to_chunk), 1):
             if cancel():
                 break
+            chunk = future_to_chunk[fut]
             try:
                 results.extend(fut.result())
+            except HTTPError as e:
+                if getattr(e.response, "status_code", None) == 429:
+                    failed_chunks.append(chunk)
+                failed += 1
+                log.error("Chunk failed (%d/%d): %r", idx, total, e)
             except Exception as e:
                 failed += 1
                 log.error("Chunk failed (%d/%d): %r", idx, total, e)
             if on_progress:
                 on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
+    if failed_chunks:
+        log.info("Retry tail for %d 429-chunks at low rate", len(failed_chunks))
+        for c in failed_chunks:
+            try:
+                data = pull(c, attempt=1)  # pull already has backoff
+                results.extend(data or [])
+            except Exception as e:
+                log.warning("Tail retry failed: %r", e)
+            time.sleep(0.4)
     if failed:
         log.warning("Refresh completed with %d failed chunks (see logs)", failed)
     norm = normalize_and_dedupe(results)

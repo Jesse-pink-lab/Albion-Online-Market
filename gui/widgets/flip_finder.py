@@ -20,6 +20,8 @@ from PySide6.QtGui import QFont
 from services.flip_engine import compute_flips
 from services import market_prices
 
+log = logging.getLogger(__name__)
+
 
 class FlipFinderWorker(QThread):
     """Background worker for computing flip opportunities."""
@@ -50,19 +52,32 @@ class FlipFinderWorker(QThread):
                 if (r.get("buy_price_max") or 0) > 0 or (r.get("sell_price_min") or 0) > 0
             ]
             self.progress.emit(50, "Computing...")
-            flips = compute_flips(
-                trimmed,
-                cities=self.params.get("cities"),
-                qualities=self.params.get("qualities"),
-                min_profit=self.params.get("min_profit", 0),
-                min_roi=self.params.get("min_roi", 0.0),
-                max_results=self.params.get("max_results", 100),
-                max_age_hours=self.params.get("max_age_hours", 24),
-            )
+            try:
+                flips = compute_flips(
+                    trimmed,
+                    cities=self.params.get("cities"),
+                    qualities=self.params.get("qualities"),
+                    min_profit=self.params.get("min_profit", 0),
+                    min_roi=self.params.get("min_roi", 0.0),
+                    max_results=self.params.get("max_results", 100),
+                    max_age_hours=self.params.get("max_age_hours", 24),
+                )
+            except Exception as e:
+                log.warning("Vectorized flip search failed: %r; retrying in pure-Python", e)
+                from services.flip_engine import compute_flips_py
+                flips = compute_flips_py(
+                    trimmed,
+                    cities=self.params.get("cities"),
+                    qualities=self.params.get("qualities"),
+                    min_profit=self.params.get("min_profit", 0),
+                    min_roi=self.params.get("min_roi", 0.0),
+                    max_results=self.params.get("max_results", 100),
+                    max_age_hours=self.params.get("max_age_hours", 24),
+                )
             self.progress.emit(100, "Done")
             self.finished.emit(flips)
         except Exception as e:
-            logging.getLogger(__name__).exception("Flip search failed: %r", e)
+            log.exception("Flip search failed: %r", e)
             self.error.emit(str(e))
 
 
