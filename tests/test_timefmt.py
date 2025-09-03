@@ -16,3 +16,9 @@ def test_rel_age_formats():
     now = datetime.now(timezone.utc)
     assert rel_age(now - timedelta(seconds=59)) == "59s"
     assert rel_age(now - timedelta(minutes=2)) == "2m"
+
+
+def test_rel_age_and_tooltip_accept_str():
+    iso = "2024-01-02T03:04:05Z"
+    assert fmt_tooltip(iso) == "2024-01-02 03:04:05Z"
+    assert isinstance(rel_age(iso), str)

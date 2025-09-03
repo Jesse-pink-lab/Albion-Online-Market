@@ -15,7 +15,7 @@ def test_no_items_short_circuit():
 
     session = types.SimpleNamespace(get=fake_get)
     settings = types.SimpleNamespace(fetch_all_items=False)
-    rows = fetch_prices("europe", "", None, None, session, settings)
+    rows = fetch_prices("europe", "", None, None, session=session, settings=settings, fetch_all=False)
     assert rows == []
     assert calls == []
 
