@@ -145,6 +145,7 @@ class ConfigManager:
             },
             'premium_enabled': True,
             'fetch_all_items': True,
+            'items_per_request': 150,
             'risk': {
                 'caerleon_high_risk': True
             },

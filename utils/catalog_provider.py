@@ -68,7 +68,7 @@ def _filter_marketable(rows: list[dict]) -> list[str]:
             continue
         u = uid.strip().upper()
         # Exclusions: tests, unused, quest, internal placeholders
-        if any(tag in u for tag in ("TEST", "UNUSED", "QUESTITEM", "DUMMY")):
+        if any(tag in u for tag in ("TEST", "UNUSED", "QUESTITEM", "DUMMY", "_PH")):
             continue
         ids.append(u)
 
