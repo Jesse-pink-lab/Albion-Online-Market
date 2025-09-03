@@ -166,7 +166,7 @@ class MarketPricesWidget(QWidget):
         cities = [i.text() for i in self.city_list.selectedItems()]
         qualities = [int(i.text()) for i in self.quality_list.selectedItems()]
         server = self.server_combo.currentText()
-        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", False))
+        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", True))
         params = {
             "server": server,
             "cities": ",".join(cities) if isinstance(cities, list) else (cities or ""),
@@ -185,7 +185,7 @@ class MarketPricesWidget(QWidget):
 
     def start_refresh(self) -> None:
         items_text = getattr(getattr(self, "itemsEdit", None), "text", lambda: "")().strip()
-        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", False))
+        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", True))
         if not items_text and not fetch_all:
             self.main_window.set_status(
                 "No items selected. Type IDs or enable 'Fetch all items' in Settings."
@@ -201,7 +201,7 @@ class MarketPricesWidget(QWidget):
 
         self._thread = QThread(self)
         # Pass application settings so the worker can honour fetch_all_items
-        self._worker = RefreshWorker(params, settings=self.main_window.settings)
+        self._worker = RefreshWorker(params, settings=self.main_window.get_config())
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self.on_refresh_progress)

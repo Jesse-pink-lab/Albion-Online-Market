@@ -128,7 +128,7 @@ class ConfigManager:
         return {
             'cities': [
                 "Martlock",
-                "Lymhurst", 
+                "Lymhurst",
                 "Bridgewatch",
                 "Fort Sterling",
                 "Thetford",
@@ -144,6 +144,7 @@ class ConfigManager:
                 'setup_fee': 0.025
             },
             'premium_enabled': True,
+            'fetch_all_items': True,
             'risk': {
                 'caerleon_high_risk': True
             },

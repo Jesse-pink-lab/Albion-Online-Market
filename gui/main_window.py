@@ -40,6 +40,7 @@ from services.albion_client import (
 )
 from core.signals import signals
 from core.health import health_store
+from utils.catalog_provider import ensure_master_catalog
 
 
 class MainWindow(QMainWindow):
@@ -58,6 +59,27 @@ class MainWindow(QMainWindow):
         self.init_status_bar(); self.init_system_tray()
         self.init_backend(); self.restore_window_state(); self.init_timers()
         signals.health_changed.connect(self.on_health_changed)
+
+    # ------------------------------------------------------------------
+    # Qt events
+    # ------------------------------------------------------------------
+    def showEvent(self, e):  # pragma: no cover - Qt framework
+        """Handle window show event to prime data and kick initial refresh."""
+
+        super().showEvent(e)
+        # 1) Ensure we have a master catalog locally
+        try:
+            ids = ensure_master_catalog()
+            self.statusBar().showMessage(f"Catalog ready: {len(ids)} item IDs", 3000)
+        except Exception as ex:  # pragma: no cover - network issues
+            self.statusBar().showMessage(
+                f"Catalog download failed; using cached/embedded list: {ex}", 4000
+            )
+        # 2) Kick a first refresh (fetch_all default is True)
+        try:
+            self.market_prices_widget.start_refresh()
+        except Exception as ex:  # pragma: no cover - unexpected
+            self.statusBar().showMessage(f"Startup refresh failed: {ex}", 5000)
     
     def init_ui(self):
         """Initialize the user interface."""

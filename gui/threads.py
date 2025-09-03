@@ -35,7 +35,7 @@ class RefreshWorker(QObject):
             server = self.params.get("server")
             cities_sel = self.params.get("cities", "")
             qual_sel = self.params.get("qualities", "")
-            fetch_all = self.params.get("fetch_all", False)
+            fetch_all = self.params.get("fetch_all", True)
             items_text = self.itemsEdit.text() if hasattr(self, "itemsEdit") else ""
 
             norm = fetch_prices(
