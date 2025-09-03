@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QSize
+from PySide6.QtGui import QIcon
+from services.item_icons import ItemIconProvider
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QLabel, QPushButton,
     QTableView, QFileDialog, QSpinBox
@@ -23,10 +25,14 @@ DEFAULT_CITIES = ["All Cities","Bridgewatch","Caerleon","Fort Sterling","Lymhurs
 QUALS = ["All","1","2","3","4","5"]
 
 
+ICON_SIZE = 24
+
+
 class ItemsModel(QAbstractTableModel):
-    def __init__(self, rows: list[dict] | None = None):
+    def __init__(self, cache_dir: str, rows: list[dict] | None = None):
         super().__init__()
         self.rows = rows or []
+        self._cache_dir = cache_dir
 
     def rowCount(self, parent=QModelIndex()): return len(self.rows)
     def columnCount(self, parent=QModelIndex()): return len(COLUMNS)
@@ -42,6 +48,15 @@ class ItemsModel(QAbstractTableModel):
             if key == "roi_pct" and isinstance(val, (int, float)):
                 return f"{val:.1f}"
             return "" if val is None else str(val)
+        if role == Qt.DecorationRole and key == "item_id":
+            prov = ItemIconProvider.instance(self._cache_dir)
+            def cb(_pm):
+                topLeft = self.index(idx.row(), 0)
+                self.dataChanged.emit(topLeft, topLeft, [Qt.DecorationRole])
+            pm = prov.get(row.get("item_id"), row.get("quality"), ICON_SIZE, cb)
+            if not pm.isNull():
+                return QIcon(pm)
+            return QIcon()
         if role == Qt.ToolTipRole and key == "updated_dt":
             return fmt_tooltip(row.get("updated_dt"))
         return None
@@ -60,6 +75,7 @@ class ItemsModel(QAbstractTableModel):
 class ItemsBrowser(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.main_window = parent
         self.rows_all: list[dict] = []
         self.rows_filtered: list[dict] = []
         self.page = 1
@@ -90,9 +106,12 @@ class ItemsBrowser(QWidget):
 
         # Table
         self.table = QTableView()
-        self.model = ItemsModel([])
+        cache_dir = self.main_window.icon_provider.cache_dir if self.main_window else ""
+        self.model = ItemsModel(cache_dir, [])
         self.table.setModel(self.model)
         self.table.setSortingEnabled(True)
+        self.table.setIconSize(QSize(24, 24))
+        self.table.verticalHeader().setDefaultSectionSize(28)
 
         lay = QVBoxLayout(self)
         lay.addLayout(top)
