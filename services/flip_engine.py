@@ -1,76 +1,42 @@
+"""Flip opportunity computations for normalized market rows."""
+
 from __future__ import annotations
 
-from typing import List, Dict, Sequence, Optional
-from datetime import datetime, timezone
-import math
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from typing import Dict, List, Optional, Sequence
+
 import logging
-import numpy as np
-try:  # pragma: no cover - optional dependency
-    import pandas as pd
-except Exception:  # pragma: no cover - handled in tests
-    pd = None
 
 from utils.timefmt import rel_age
+from utils.constants import MAX_DATA_AGE_HOURS
 
 log = logging.getLogger(__name__)
 
 
-def _to_py_utc(dt):
-    """Best-effort conversion of ``dt`` to a timezone-aware UTC ``datetime``."""
+def _ensure_utc(dt) -> datetime | None:
+    """Return ``dt`` as a timezone aware UTC datetime or ``None``."""
     if dt is None:
         return None
-    if isinstance(dt, float):
-        if pd is not None:
-            if pd.isna(dt):
-                return None
-        else:
-            if math.isnan(dt):
-                return None
-    try:
-        if pd is not None and isinstance(dt, pd.Timestamp):
-            dt = dt.to_pydatetime()
-        if isinstance(dt, str):
-            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
-        if isinstance(dt, datetime):
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            else:
-                dt = dt.astimezone(timezone.utc)
-            if dt.year < 2000 or dt.year > 2100:
-                return None
-            return dt
-    except Exception:  # pragma: no cover - defensive
-        pass
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    if isinstance(dt, str):  # ISO 8601
+        try:
+            return datetime.fromisoformat(dt.replace("Z", "+00:00")).astimezone(timezone.utc)
+        except Exception:  # pragma: no cover - defensive
+            return None
     return None
 
 
-def _coerce_datetime_series(s):
-    import pandas as pd
-    # First, try generic parse (handles ISO/Timestamp/None)
-    dt = pd.to_datetime(s, utc=True, errors="coerce")
-
-    # For entries still NaT, try numeric epoch seconds
-    mask = dt.isna()
-    if mask.any():
-        num = pd.to_numeric(s[mask], errors="coerce")
-        dt_s = pd.to_datetime(num, unit="s", utc=True, errors="coerce")
-        dt = dt.mask(mask, dt_s)
-
-    # For entries still NaT, try ms
-    mask = dt.isna()
-    if mask.any():
-        num = pd.to_numeric(s[mask], errors="coerce")
-        dt_ms = pd.to_datetime(num, unit="ms", utc=True, errors="coerce")
-        dt = dt.mask(mask, dt_ms)
-
-    # For entries still NaT, try µs
-    mask = dt.isna()
-    if mask.any():
-        num = pd.to_numeric(s[mask], errors="coerce")
-        dt_us = pd.to_datetime(num, unit="us", utc=True, errors="coerce")
-        dt = dt.mask(mask, dt_us)
-
-    return dt
+def _is_fresh(dt: datetime | None, max_age_hours: int) -> bool:
+    if dt is None:
+        return False
+    if max_age_hours <= 0:
+        return True
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    return dt >= cutoff
 
 
 def compute_flips(
@@ -80,232 +46,109 @@ def compute_flips(
     min_profit: int = 0,
     min_roi: float = 0.0,
     max_results: int = 1000,
-    max_age_hours: int = 24,
+    max_age_hours: int = MAX_DATA_AGE_HOURS,
 ) -> List[Dict]:
-    """Compute flip opportunities from normalized rows."""
-    log.info(
-        "Flip search: rows_in=%d, cities=%s, quals=%s, max_age=%dh",
-        len(rows),
-        len(cities) if cities else "All",
-        "All" if not qualities else len(qualities),
-        max_age_hours,
+    """Public entry point – delegates to the pure Python implementation."""
+
+    return compute_flips_py(
+        rows,
+        cities=cities,
+        qualities=qualities,
+        min_profit=min_profit,
+        min_roi=min_roi,
+        max_results=max_results,
+        max_age_hours=max_age_hours,
     )
-    if pd is None:
-        return compute_flips_py(
-            rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours
-        )
-
-    try:
-        if not rows:
-            return []
-
-        df = pd.DataFrame(
-            rows,
-            columns=[
-                "item_id",
-                "city",
-                "quality",
-                "buy_price_max",
-                "sell_price_min",
-                "updated_dt",
-            ],
-        )
-
-        # Reduce to necessary columns and drop zeros early
-        df = df[(df["buy_price_max"] > 0) | (df["sell_price_min"] > 0)]
-        df["item_id"] = df["item_id"].astype("category")
-        df["city"] = df["city"].astype("category")
-
-        # Filters
-        if cities:
-            df = df[df["city"].isin(list(cities))]
-        if qualities:
-            df = df[df["quality"].isin(list(qualities))]
-
-        # Age filter
-        if max_age_hours and max_age_hours > 0:
-            dt = _coerce_datetime_series(df["updated_dt"])
-            cutoff = pd.Timestamp.utcnow() - pd.Timedelta(hours=max_age_hours)
-            df = df[dt >= cutoff]
-        df = df.copy()
-        df["udt"] = _coerce_datetime_series(df["updated_dt"])
-        # clean numeric columns and drop zeros/negatives
-        df["buy_price_max"] = pd.to_numeric(df["buy_price_max"], errors="coerce").fillna(0).astype(np.int64)
-        df["sell_price_min"] = pd.to_numeric(df["sell_price_min"], errors="coerce").fillna(0).astype(np.int64)
-
-        if df.empty:
-            return []
-
-        # Per item×city bests
-        grp = df.groupby(["item_id", "city"], as_index=False, observed=False).agg(
-            buy=("buy_price_max", "max"),
-            sell=("sell_price_min", "min"),
-            updated=("udt", "max"),
-            qual=("quality", "max"),
-        )
-
-        # Drop zeros and non-sense
-        grp = grp[(grp["buy"] > 0) | (grp["sell"] > 0)]
-        grp = grp[(grp["buy"] >= 0) & (grp["sell"] >= 0)]
-        log.info("Flip search: grouped item×city = %d (after filters)", len(grp))
-        if grp.empty:
-            return []
-
-        # Build city→city pairs per item
-        left = grp[["item_id", "city", "buy", "updated"]].rename(
-            columns={"city": "buy_city", "buy": "buy", "updated": "updated_buy"}
-        )
-        right = grp[["item_id", "city", "sell", "updated"]].rename(
-            columns={"city": "sell_city", "sell": "sell", "updated": "updated_sell"}
-        )
-
-        pairs = left.merge(right, on="item_id", how="inner")
-        pairs = pairs[pairs["buy_city"] != pairs["sell_city"]]
-        pair_count = len(pairs)
-
-        pairs = pairs[pairs["buy"] > 0]
-        pairs["spread"] = (pairs["sell"] - pairs["buy"]).clip(lower=0)
-        pairs["roi_pct"] = (pairs["spread"] / pairs["buy"]) * 100.0
-        # guard against absurd ROI (e.g., stale bad quotes)
-        pairs = pairs.replace([np.inf, -np.inf], np.nan).dropna(subset=["roi_pct"])
-        pairs = pairs[pairs["roi_pct"] < 100000]  # 1e5% max cap
-
-        before_threshold = len(pairs)
-        if min_profit:
-            pairs = pairs[pairs["spread"] >= int(min_profit)]
-        if min_roi:
-            pairs = pairs[pairs["roi_pct"] >= float(min_roi)]
-        after_threshold = len(pairs)
-        log.info(
-            "Flip search: pairs computed = %d, candidates after thresholds = %d",
-            pair_count,
-            after_threshold,
-        )
-
-        if pairs.empty:
-            return []
-
-        pairs = pairs.sort_values(["roi_pct", "spread"], ascending=[False, False]).head(
-            int(max_results)
-        )
-
-        out = []
-        for r in pairs.itertuples(index=False):
-            raw_dt = r.updated_buy if pd.notna(r.updated_buy) else r.updated_sell
-            udt = _to_py_utc(raw_dt)
-            out.append(
-                {
-                    "item": r.item_id,
-                    "buy_city": r.buy_city,
-                    "sell_city": r.sell_city,
-                    "buy": int(r.buy),
-                    "sell": int(r.sell),
-                    "spread": int(r.spread),
-                    "roi_pct": float(r.roi_pct),
-                    "updated_dt": udt,
-                    "updated": rel_age(udt) if udt else "",
-                }
-            )
-        return out
-    except ImportError:
-        return compute_flips_py(
-            rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours
-        )
 
 
-def compute_flips_py(rows, cities, qualities, min_profit, min_roi, max_results, max_age_hours):
-    from collections import defaultdict
+def compute_flips_py(
+    rows: List[Dict],
+    cities: Optional[Sequence[str]] = None,
+    qualities: Optional[Sequence[int]] = None,
+    min_profit: int = 0,
+    min_roi: float = 0.0,
+    max_results: int = 1000,
+    max_age_hours: int = MAX_DATA_AGE_HOURS,
+) -> List[Dict]:
+    """Compute flip opportunities from normalized rows using only Python."""
 
     if not rows:
         return []
 
-    log.info(
-        "Flip search: rows_in=%d, cities=%s, quals=%s, max_age=%dh",
-        len(rows),
-        len(cities) if cities else "All",
-        "All" if not qualities else len(qualities),
-        max_age_hours,
-    )
+    cities_set = set(cities or [])
+    qualities_set = set(qualities or [])
 
-    def recent(dt):
-        dtv = _to_py_utc(dt)
-        if dtv is None:
-            return False
-        if max_age_hours <= 0:
-            return True
-        return (datetime.now(timezone.utc) - dtv).total_seconds() <= max_age_hours * 3600
-
-    best_buy = defaultdict(lambda: defaultdict(int))
-    best_sell = defaultdict(lambda: defaultdict(lambda: math.inf))
-    updated = defaultdict(lambda: defaultdict(lambda: None))
+    # Maps: (item_id, quality) -> city -> value
+    best_buy: Dict[tuple, Dict[str, int]] = defaultdict(dict)
+    best_sell: Dict[tuple, Dict[str, int]] = defaultdict(dict)
+    updated: Dict[tuple, Dict[str, datetime]] = defaultdict(dict)
+    names: Dict[tuple, str] = {}
 
     for r in rows:
-        if cities and r["city"] not in cities:
+        item = r.get("item_id")
+        city = r.get("city")
+        quality = int(r.get("quality") or 1)
+        if cities_set and city not in cities_set:
             continue
-        if qualities and r["quality"] not in qualities:
+        if qualities_set and quality not in qualities_set:
             continue
-        if max_age_hours > 0 and not recent(r.get("updated_dt")):
-            continue
-        b = int(r.get("buy_price_max") or 0)
-        s = int(r.get("sell_price_min") or 0)
-        if b <= 0 and s <= 0:
-            continue
-        it, c = r["item_id"], r["city"]
-        if b > best_buy[it][c]:
-            best_buy[it][c] = b
-        if s > 0 and s < best_sell[it][c]:
-            best_sell[it][c] = s
-        prev = updated[it][c]
-        u = _to_py_utc(r.get("updated_dt"))
-        if prev is None or (u and prev and u > prev):
-            updated[it][c] = u
 
-    out = []
-    pair_count = 0
-    for it, buys in best_buy.items():
-        sells = best_sell.get(it, {})
-        cities_b = list(buys.keys())
-        cities_s = list(sells.keys())
-        for cb in cities_b:
-            b = buys[cb]
-            if b <= 0:
-                continue
-            for cs in cities_s:
-                if cs == cb:
+        udt = _ensure_utc(r.get("updated_dt"))
+        if not _is_fresh(udt, max_age_hours):
+            continue
+
+        key = (item, quality)
+        names[key] = r.get("item_name") or item
+
+        buy = int(r.get("buy_price_max") or 0)
+        sell = int(r.get("sell_price_min") or 0)
+
+        if buy > 0:
+            prev = best_buy[key].get(city, 0)
+            if buy > prev:
+                best_buy[key][city] = buy
+        if sell > 0:
+            prev_s = best_sell[key].get(city)
+            if prev_s is None or sell < prev_s:
+                best_sell[key][city] = sell
+        if udt and (updated[key].get(city) is None or udt > updated[key][city]):
+            updated[key][city] = udt
+
+    out: List[Dict] = []
+    for key, buys in best_buy.items():
+        sells = best_sell.get(key, {})
+        item, quality = key
+        for src, buy_price in buys.items():
+            for dst, sell_price in sells.items():
+                if src == dst:
                     continue
-                se = sells[cs]
-                if not math.isfinite(se) or se <= 0:
+                spread = sell_price - buy_price
+                if buy_price <= 0 or sell_price <= 0 or spread <= 0:
                     continue
-                pair_count += 1
-                spread = se - b
+                roi = (spread / buy_price) * 100.0
                 if spread < max(0, int(min_profit)):
                     continue
-                roi = (spread / b) * 100.0
                 if roi < float(min_roi):
                     continue
-                u = updated[it][cb] or updated[it].get(cs)
-                udt = u
+                udt = max(updated[key].get(src), updated[key].get(dst))
                 out.append(
                     {
-                        "item": it,
-                        "buy_city": cb,
-                        "sell_city": cs,
-                        "buy": b,
-                        "sell": se,
+                        "item_id": item,
+                        "item_name": names.get(key, item),
+                        "from": src,
+                        "to": dst,
+                        "quality": quality,
+                        "buy": buy_price,
+                        "sell": sell_price,
                         "spread": spread,
                         "roi_pct": roi,
                         "updated_dt": udt,
-                        "updated": rel_age(udt) if udt else "",
+                        "updated_human": rel_age(udt) if udt else "",
                     }
                 )
-    after_threshold = len(out)
-    log.info(
-        "Flip search: pairs computed = %d, candidates after thresholds = %d",
-        pair_count,
-        after_threshold,
-    )
+
     out.sort(key=lambda r: (r["roi_pct"], r["spread"]), reverse=True)
     return out[: int(max_results)]
 
 
-__all__ = ["compute_flips"]
+__all__ = ["compute_flips", "compute_flips_py"]
