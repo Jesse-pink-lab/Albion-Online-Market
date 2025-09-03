@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QSettings
 from PySide6.QtGui import QAction, QIcon, QPixmap
+from platformdirs import PlatformDirs
+from services.item_icons import ItemIconProvider
 
 # Import custom widgets
 from gui.widgets.dashboard import DashboardWidget
@@ -54,6 +56,8 @@ class MainWindow(QMainWindow):
         self.db_manager = db_manager or DatabaseManager(self.config)
         self.api_client = None
         self.settings = QSettings('AlbionTradeOptimizer', 'AlbionTradeOptimizer')
+        app_dirs = PlatformDirs("AlbionTradeOptimizer")
+        self.icon_provider = ItemIconProvider.instance(app_dirs.user_cache_dir + "/icons")
         self.albion_proc: Optional[subprocess.Popen] = None
         self.init_ui(); self.init_menu_bar(); self.init_tool_bar()
         self.init_status_bar(); self.init_system_tray()

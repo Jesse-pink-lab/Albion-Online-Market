@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import Qt, QThread, QSize
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -90,6 +91,8 @@ class MarketPricesWidget(QWidget):
 
         body = QHBoxLayout()
         self.table = QTableWidget(0, 7)
+        self.table.setIconSize(QSize(24, 24))
+        self.table.verticalHeader().setDefaultSectionSize(28)
         self.table.setHorizontalHeaderLabels(
             [
                 "Item",
@@ -122,7 +125,15 @@ class MarketPricesWidget(QWidget):
     def populate_table(self) -> None:
         self.table.setRowCount(len(self.rows))
         for row_index, row in enumerate(self.rows):
-            self.table.setItem(row_index, 0, QTableWidgetItem(row["item_id"]))
+            item_item = QTableWidgetItem(row["item_id"])
+            prov = self.main_window.icon_provider
+            def cb(pm, item=item_item):
+                if not pm.isNull():
+                    item.setIcon(QIcon(pm))
+            pm = prov.get(row["item_id"], row.get("quality"), 24, cb)
+            if not pm.isNull():
+                item_item.setIcon(QIcon(pm))
+            self.table.setItem(row_index, 0, item_item)
             route = f"{row.get('buy_city') or '-'} → {row.get('sell_city') or '-'}"
             self.table.setItem(row_index, 1, QTableWidgetItem(route))
             self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_price_max"))))

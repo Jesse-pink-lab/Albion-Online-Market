@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QHeaderView, QAbstractItemView, QSplitter, QTextEdit,
     QProgressBar, QFrame, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtGui import QFont, QIcon
 
 from services.flip_engine import compute_flips
 from services import market_prices
@@ -268,6 +268,8 @@ class FlipFinderWidget(QWidget):
         # Results table
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(9)
+        self.results_table.setIconSize(QSize(24, 24))
+        self.results_table.verticalHeader().setDefaultSectionSize(28)
         self.results_table.setHorizontalHeaderLabels([
             "Item", "Quality", "Strategy", "Route", "Profit", "ROI %", "Investment", "Risk", "Updated"
         ])
@@ -429,6 +431,13 @@ class FlipFinderWidget(QWidget):
 
         for row, flip in enumerate(flips):
             item_item = QTableWidgetItem(flip["item"])
+            prov = self.main_window.icon_provider
+            def cb(pm, item=item_item):
+                if not pm.isNull():
+                    item.setIcon(QIcon(pm))
+            pm = prov.get(flip["item"], flip.get("quality"), 24, cb)
+            if not pm.isNull():
+                item_item.setIcon(QIcon(pm))
             self.results_table.setItem(row, 0, item_item)
 
             quality_item = QTableWidgetItem("")
