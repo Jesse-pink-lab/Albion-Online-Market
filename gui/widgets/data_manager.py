@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QGroupBox, QFrame, QTextEdit,
     QProgressBar, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox
+    QHeaderView, QMessageBox, QComboBox
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
@@ -34,9 +34,11 @@ class DataManagerWidget(QWidget):
         self.last_update = None
         self.data_stats = {}
         self.api_online = False
-        
+
         self.init_ui()
         self.init_timer()
+        signals.health_changed.connect(self.on_health_changed)
+        self.refreshApiStatus()
     
     def init_ui(self):
         """Initialize the user interface."""
@@ -74,7 +76,11 @@ class DataManagerWidget(QWidget):
         header_layout.addWidget(title_label)
         
         header_layout.addStretch()
-        
+
+        self.server_combo = QComboBox()
+        self.server_combo.addItems(["europe", "east", "west"])
+        header_layout.addWidget(self.server_combo)
+
         # Refresh button
         refresh_btn = QPushButton("🔄 Refresh Status")
         refresh_btn.clicked.connect(self.refresh_status)
@@ -102,6 +108,7 @@ class DataManagerWidget(QWidget):
             QColor(25, 118, 210)
         )
         parent_layout.addWidget(self.api_status_card, 0, 0)
+        self.lblApiStatus = self.api_status_card.value_label
         
         # Database Status card
         self.db_status_card = self.create_status_card(
@@ -257,20 +264,14 @@ class DataManagerWidget(QWidget):
         self.status_timer.start(30000)  # Update every 30 seconds
 
         # Initial status update
-        signals.health_changed.connect(self.on_health_changed)
         self.update_status()
     
     def update_status(self):
         """Update data status information."""
         try:
-            # Check API status
-            api_client = self.main_window.get_api_client()
-            if api_client:
-                api_client.get_server_status()
-            else:
-                self.api_status_card.value_label.setText("❌ N/A")
-                self.api_status_card.subtitle_label.setText("Not Initialized")
-            
+            # Check API status via shared health ping
+            self.refreshApiStatus()
+
             # Check database status
             db_manager = self.main_window.get_db_manager()
             if db_manager:
@@ -308,15 +309,26 @@ class DataManagerWidget(QWidget):
             self.logger.error(f"Failed to update status: {e}")
 
     def on_health_changed(self, store) -> None:
-        self.api_online = store.aodp_online
-        if store.aodp_online:
+        from core.health import store as health_store
+
+        self.api_online = health_store.aodp_online
+        if health_store.aodp_online:
+            self.lblApiStatus.setText("Online")
             self.api_status_card.value_label.setText("🟢 Online")
-            if store.last_checked:
-                self.api_status_card.subtitle_label.setText(fmt_tooltip(store.last_checked))
+            self.api_status_card.subtitle_label.setText("AODP Connection")
         else:
+            self.lblApiStatus.setText("Offline")
             self.api_status_card.value_label.setText("🔴 Offline")
             self.api_status_card.subtitle_label.setText("Connection Error")
         self.update_sources_table()
+
+    def refreshApiStatus(self):
+        from core.health import ping_aodp
+
+        server = self.server_combo.currentText().strip().lower()
+        ping_aodp(server)
+        # redraw using store
+        self.on_health_changed(None)
     
     def update_sources_table(self):
         """Update data sources table."""
@@ -420,7 +432,7 @@ class DataManagerWidget(QWidget):
             "Export Data",
             "Data export functionality will be implemented in a future version.\n\nThis will allow you to export market data to CSV, JSON, or Excel formats."
         )
-        self.set_status("Export feature coming soon")
+        self.set_status("Export feature not yet implemented")
     
     def import_data(self):
         """Import data from file."""
@@ -430,7 +442,7 @@ class DataManagerWidget(QWidget):
             "Import Data",
             "Data import functionality will be implemented in a future version.\n\nThis will allow you to import market data from CSV, JSON, or Excel files."
         )
-        self.set_status("Import feature coming soon")
+        self.set_status("Import feature not yet implemented")
     
     def refresh_data(self):
         """Refresh data (called from main window)."""

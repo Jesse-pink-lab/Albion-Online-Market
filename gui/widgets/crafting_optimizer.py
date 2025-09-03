@@ -36,8 +36,8 @@ class CraftingOptimizerWidget(QWidget):
         # Create header
         self.create_header(layout)
         
-        # Create placeholder content
-        self.create_placeholder_content(layout)
+        # Create empty state content
+        self.create_empty_state(layout)
     
     def create_header(self, parent_layout):
         """Create header with title."""
@@ -57,28 +57,16 @@ class CraftingOptimizerWidget(QWidget):
         
         parent_layout.addWidget(header_frame)
     
-    def create_placeholder_content(self, parent_layout):
-        """Create placeholder content."""
+    def create_empty_state(self, parent_layout):
+        """Create empty state content."""
         content_group = QGroupBox("Crafting Analysis")
         content_layout = QVBoxLayout(content_group)
         
-        # Placeholder message
-        placeholder_label = QLabel("""
-        🔨 Crafting Optimizer - Coming Soon!
-        
-        This feature will include:
-        • Recipe profitability analysis
-        • Material cost optimization
-        • Production chain planning
-        • Focus efficiency calculations
-        • Station fee comparisons
-        
-        The backend crafting engine is already implemented.
-        GUI implementation is in progress.
-        """)
-        placeholder_label.setAlignment(Qt.AlignCenter)
-        placeholder_label.setStyleSheet("color: gray; font-size: 14px;")
-        content_layout.addWidget(placeholder_label)
+        # Empty state message
+        msg = QLabel("No crafting data yet — feature not implemented")
+        msg.setAlignment(Qt.AlignCenter)
+        msg.setStyleSheet("color: gray; font-size: 14px;")
+        content_layout.addWidget(msg)
         
         parent_layout.addWidget(content_group)
         parent_layout.addStretch()

@@ -55,4 +55,9 @@ def fmt_tooltip(utc_dt: datetime) -> str:
     return utc_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
-__all__ = ["to_utc", "rel_age", "fmt_tooltip"]
+def now_utc_iso() -> str:
+    """Return current UTC time as ISO8601 string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+__all__ = ["to_utc", "rel_age", "fmt_tooltip", "now_utc_iso"]
