@@ -110,7 +110,7 @@ class SettingsWidget(QWidget):
         # Chunk size
         api_layout.addWidget(QLabel("Items per Request:"), row, 0)
         self.chunk_size_spin = QSpinBox()
-        self.chunk_size_spin.setRange(1, 100)
+        self.chunk_size_spin.setRange(1, 300)
         api_layout.addWidget(self.chunk_size_spin, row, 1)
         row += 1
         
@@ -333,7 +333,10 @@ class SettingsWidget(QWidget):
             self.api_url_edit.setText(aodp_config.get('base_url', ''))
             self.rate_delay_spin.setValue(aodp_config.get('rate_delay_seconds', 1.0))
             self.timeout_spin.setValue(aodp_config.get('timeout_seconds', 30))
-            self.chunk_size_spin.setValue(aodp_config.get('chunk_size', 40))
+            chunk_val = self.config.get('items_per_request')
+            if chunk_val is None:
+                chunk_val = aodp_config.get('chunk_size', 150)
+            self.chunk_size_spin.setValue(chunk_val)
 
             # Trading settings
             self.premium_check.setChecked(self.config.get('premium_enabled', True))
@@ -387,7 +390,9 @@ class SettingsWidget(QWidget):
             config['aodp']['base_url'] = self.api_url_edit.text()
             config['aodp']['rate_delay_seconds'] = self.rate_delay_spin.value()
             config['aodp']['timeout_seconds'] = self.timeout_spin.value()
-            config['aodp']['chunk_size'] = self.chunk_size_spin.value()
+            chunk_val = self.chunk_size_spin.value()
+            config['aodp']['chunk_size'] = chunk_val
+            config['items_per_request'] = chunk_val
             
             # Trading settings
             config['premium_enabled'] = self.premium_check.isChecked()

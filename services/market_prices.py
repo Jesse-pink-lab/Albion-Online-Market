@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import time
 from typing import List, Dict
+from urllib.parse import urlencode
 import requests
 
 from datasources.http import get_shared_session
@@ -18,6 +19,48 @@ from core.signals import signals
 log = logging.getLogger(__name__)
 
 DEFAULT_QUALITIES = "1,2,3,4,5"  # include 5 (Masterpiece)
+
+# Conservative safety margin; many proxies reject > ~2000 bytes.
+MAX_URL_LEN = 1800
+
+
+def _estimate_url_len(base: str, items: list[str], cities_csv: str, quals_csv: str) -> int:
+    """Estimate URL length for the given parameters."""
+    path = f"{base}/api/v2/stats/prices/{','.join(items)}.json"
+    q = urlencode({"locations": cities_csv, "qualities": quals_csv})
+    return len(path) + 1 + len(q)  # +1 for "?"
+
+
+def _chunk_by_len_and_count(
+    all_items: list[str],
+    base: str,
+    cities_csv: str,
+    quals_csv: str,
+    max_count: int,
+    max_url: int = MAX_URL_LEN,
+) -> list[list[str]]:
+    """Chunk ``all_items`` by item count and estimated URL length."""
+    chunks: list[list[str]] = []
+    cur: list[str] = []
+    for it in all_items:
+        probe = cur + [it]
+        if (
+            len(probe) > 0
+            and len(probe) <= max_count
+            and _estimate_url_len(base, probe, cities_csv, quals_csv) <= max_url
+        ):
+            cur = probe
+            continue
+        if cur:
+            chunks.append(cur)
+            cur = []
+        if _estimate_url_len(base, [it], cities_csv, quals_csv) <= max_url and max_count >= 1:
+            cur = [it]
+        else:
+            chunks.append([it])
+    if cur:
+        chunks.append(cur)
+    return chunks
 
 
 def fetch_prices(
@@ -52,11 +95,18 @@ def fetch_prices(
     )
 
     cities = cities_to_list(cities_sel, DEFAULT_CITIES)
+    cities_csv = ",".join(cities)
     quals_csv = qualities_to_csv(qual_sel)
     base = base_for(server)
 
-    chunk_size, max_workers = 150, 4
-    chunks = [items[i:i+chunk_size] for i in range(0, len(items), chunk_size)]
+    # Respect settings.ItemsPerRequest if present (default 150)
+    chunk_size = int(
+        getattr(settings, "items_per_request", None)
+        or (settings.get("items_per_request") if isinstance(settings, dict) else None)
+        or 150
+    )
+    max_workers = 4
+    chunks = _chunk_by_len_and_count(items, base, cities_csv, quals_csv, chunk_size)
     results: List[Dict] = []
 
     def pull(chunk, attempt=1):
@@ -67,6 +117,14 @@ def fetch_prices(
         )
         log.debug("AODP URL: %s params=%s", url, params)
         r = sess.get(url, params=params, timeout=(5,10))
+        if r.status_code == 414:
+            if len(chunk) == 1:
+                log.warning("414 on single item; skipping id=%s", chunk[0])
+                return []
+            mid = max(1, len(chunk)//2)
+            left = pull(chunk[:mid], 1)
+            right = pull(chunk[mid:], 1)
+            return (left or []) + (right or [])
         if r.status_code in (429,500,502,503,504) and attempt <= 4:
             time.sleep(0.5 * (2 ** (attempt-1)))
             return pull(chunk, attempt+1)
@@ -75,12 +133,22 @@ def fetch_prices(
         log.info("AODP RESP: status=%s records=%d", r.status_code, len(data))
         return data
 
+    failed = 0
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(pull, c) for c in chunks]
+        total = len(futs)
         for idx, fut in enumerate(as_completed(futs), 1):
-            if cancel(): break
-            results.extend(fut.result())
-            if on_progress: on_progress(int(idx/len(chunks)*100), f"Fetched {idx}/{len(chunks)}")
+            if cancel():
+                break
+            try:
+                results.extend(fut.result())
+            except Exception as e:
+                failed += 1
+                log.error("Chunk failed (%d/%d): %r", idx, total, e)
+            if on_progress:
+                on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
+    if failed:
+        log.warning("Refresh completed with %d failed chunks (see logs)", failed)
     norm = normalize_and_dedupe(results)
     signals.market_rows_updated.emit(norm)
     emit_summary(norm)
