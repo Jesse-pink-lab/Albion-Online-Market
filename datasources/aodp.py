@@ -346,28 +346,10 @@ class AODPClient:
             return False
     
     def get_server_status(self) -> Dict[str, Any]:
-        """Get API server status information."""
-        try:
-            # Make a simple request to check server status
-            response = self.session.get(
-                self.base_url,
-                timeout=10,
-            )
+        from core.health import ping_aodp
 
-            online = response.status_code == 200
-            return {
-                'status': 'online' if online else 'error',
-                'status_code': response.status_code,
-                'response_time_ms': response.elapsed.total_seconds() * 1000,
-                'base_url': self.base_url
-            }
-
-        except Exception as e:
-            return {
-                'status': 'offline',
-                'error': str(e),
-                'base_url': self.base_url
-            }
+        ok = ping_aodp(self.server or "europe")
+        return {"online": ok}
     
     def close(self):
         """Close the HTTP session."""

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor
 from core.signals import signals
-from utils.timefmt import fmt_tooltip
 
 
 class DataManagerWidget(QWidget):
@@ -319,7 +318,7 @@ class DataManagerWidget(QWidget):
         else:
             self.lblApiStatus.setText("Offline")
             self.api_status_card.value_label.setText("🔴 Offline")
-            self.api_status_card.subtitle_label.setText("Connection Error")
+            self.api_status_card.subtitle_label.setText("Check network / rate limits")
         self.update_sources_table()
 
     def refreshApiStatus(self):
