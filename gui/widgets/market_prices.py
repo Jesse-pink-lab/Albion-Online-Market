@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from services.market_prices import fetch_prices
-from utils.timefmt import to_utc, rel_age, fmt_tooltip
+from utils.timefmt import rel_age, fmt_tooltip
 from core.signals import signals
 
 
@@ -151,7 +151,7 @@ class MarketPricesWidget(QWidget):
             roi = row.get("roi_pct")
             self.table.setItem(row_index, 6, QTableWidgetItem(f"{roi:.2f}" if roi is not None else ""))
 
-            dt = row.get("buy_date") or row.get("sell_date")
+            dt = row.get("updated_dt")
             item = QTableWidgetItem("")
             if dt:
                 item.setText(rel_age(dt))
@@ -166,7 +166,7 @@ class MarketPricesWidget(QWidget):
         row = self.rows[self.table.currentRow()]
         buy = row.get("buy_city"), row.get("buy_price_max")
         sell = row.get("sell_city"), row.get("sell_price_min")
-        dt = row.get("sell_date") or row.get("buy_date")
+        dt = row.get("updated_dt")
         age = rel_age(dt) if dt else "?"
         if buy[0] and sell[0]:
             self.best_buy_label.setText(

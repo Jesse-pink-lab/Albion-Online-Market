@@ -8,24 +8,16 @@ import logging
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin
 
 import json
 import requests
-from core.health import update_aodp_status
+from datasources.aodp_url import base_for, build_prices_request
 
 # ---------------------------------------------------------------------------
-# Server resolution and shared session
-# ---------------------------------------------------------------------------
-
-SERVER_BASE = {
-    "west": "https://west.albion-online-data.com",
-    "east": "https://east.albion-online-data.com",
-    "europe": "https://europe.albion-online-data.com",
-}
-
 # Shared session used by higher level services.  Tests rely on predictable
 # timeout behaviour so we keep it here as a central definition.
+# ---------------------------------------------------------------------------
+
 SESSION = requests.Session()
 SESSION.headers.update(
     {
@@ -51,11 +43,9 @@ class AODPClient:
         
         # API configuration
         aodp_config = config.get('aodp', {})
-        self.base_url = aodp_config.get(
-            'base_url', 'https://www.albion-online-data.com/api/v2/stats'
-        )
         # Default to Europe server unless specified
         self.server = aodp_config.get('server', 'europe')
+        self.base_url = base_for(self.server)
         self.chunk_size = aodp_config.get('chunk_size', 40)
         self.rate_delay = aodp_config.get('rate_delay_seconds', 1)
         self.timeout = aodp_config.get('timeout_seconds', 30)
@@ -99,38 +89,21 @@ class AODPClient:
         self.last_request_time = time.time()
         self.request_count += 1
     
-    def _make_request(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Make a request to the AODP API with error handling."""
         self._enforce_rate_limit()
-
-        # Ensure proper URL joining - base_url should end with / for urljoin to work correctly
-        base_url = self.base_url
-        if not base_url.endswith('/'):
-            base_url += '/'
-
-        url = urljoin(base_url, endpoint)
-
-        # Inject default server parameter if configured
-        request_params = dict(params or {})
-        if self.server and 'server' not in request_params:
-            request_params['server'] = self.server
-
         try:
-            self.logger.debug(f"Making request to {url} with params {request_params}")
-
-            response = self.session.get(url, params=request_params, timeout=self.timeout)
+            self.logger.debug(f"Making request to {url} with params {params}")
+            response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
-            
-            # Parse JSON response
             data = response.json()
-            
-            self.logger.debug(f"Received {len(data) if isinstance(data, list) else 1} records")
+            self.logger.debug(
+                f"Received {len(data) if isinstance(data, list) else 1} records"
+            )
             return data
-            
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Request failed: {e}")
             raise AODPAPIError(f"API request failed: {e}")
-        
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON response: {e}")
             raise AODPAPIError(f"Invalid JSON response: {e}")
@@ -176,24 +149,13 @@ class AODPClient:
         self.logger.info(f"Retrieved {len(all_prices)} price records for {len(item_ids)} items")
         return all_prices
     
-    def _get_prices_chunk(self, item_ids: List[str], locations: List[str], 
-                         qualities: List[int]) -> List[Dict[str, Any]]:
+    def _get_prices_chunk(
+        self, item_ids: List[str], locations: List[str], qualities: List[int]
+    ) -> List[Dict[str, Any]]:
         """Get prices for a chunk of items."""
-        # Build endpoint URL - note: base_url already includes /api/v2/stats
-        items_str = ','.join(item_ids)
-        endpoint = f"prices/{items_str}.json"
-        
-        # Build query parameters
-        params = {}
-        
-        if locations:
-            params['locations'] = ','.join(locations)
-        
-        if qualities:
-            params['qualities'] = ','.join(map(str, qualities))
-        
-        # Make API request
-        data = self._make_request(endpoint, params)
+        quals_csv = ",".join(map(str, qualities))
+        url, params = build_prices_request(self.base_url, item_ids, locations, quals_csv)
+        data = self._make_request(url, params)
         
         # Process response data
         processed_prices = []
@@ -301,9 +263,9 @@ class AODPClient:
     def _get_history_chunk(self, item_ids: List[str], locations: List[str],
                           qualities: List[int], days_back: int) -> List[Dict[str, Any]]:
         """Get historical data for a chunk of items."""
-        # Build endpoint URL
+        # Build full URL
         items_str = ','.join(item_ids)
-        endpoint = f"history/{items_str}.json"
+        url = f"{self.base_url}/api/v2/stats/history/{items_str}.json"
         
         # Calculate date range
         from datetime import datetime, timedelta
@@ -324,7 +286,7 @@ class AODPClient:
             params['qualities'] = ','.join(map(str, qualities))
         
         # Make API request
-        data = self._make_request(endpoint, params)
+        data = self._make_request(url, params)
         
         # Process response data
         processed_history = []
@@ -388,13 +350,11 @@ class AODPClient:
         try:
             # Make a simple request to check server status
             response = self.session.get(
-                self.base_url.replace('/stats', ''),
-                params={'server': self.server} if self.server else None,
+                self.base_url,
                 timeout=10,
             )
 
             online = response.status_code == 200
-            update_aodp_status(online)
             return {
                 'status': 'online' if online else 'error',
                 'status_code': response.status_code,
@@ -403,7 +363,6 @@ class AODPClient:
             }
 
         except Exception as e:
-            update_aodp_status(False)
             return {
                 'status': 'offline',
                 'error': str(e),

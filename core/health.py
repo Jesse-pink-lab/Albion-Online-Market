@@ -1,96 +1,41 @@
-from __future__ import annotations
+import logging, requests
+from datasources.aodp_url import base_for, build_prices_request
+from core.signals import signals
 
-import logging
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+log = logging.getLogger(__name__)
 
-import requests
-
-from datasources.aodp_url import base_for, build_prices_url
-from .signals import signals
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass
 class HealthStore:
-    """Application health status with simple failure tracking."""
+    def __init__(self):
+        self.aodp_online = False
+        self._fails = 0
 
-    aodp_online: bool = True
-    fail_count: int = 0
-    last_checked: Optional[datetime] = None
+    def set_online(self, online: bool):
+        if online != self.aodp_online:
+            self.aodp_online = online
+            log.info("Health change: aodp_online=%s", online)
+            signals.health_changed.emit(self)
 
+store = HealthStore()
 
-health_store = HealthStore()
-
-
-def _emit_change() -> None:
-    logger.info("Health change: aodp_online=%s", health_store.aodp_online)
-    signals.health_changed.emit(health_store)
-
-
-def update_aodp_status(online: bool) -> HealthStore:
-    """Directly set the online flag and reset fail counter."""
-
-    health_store.aodp_online = online
-    health_store.fail_count = 0
-    health_store.last_checked = datetime.now(timezone.utc)
-    _emit_change()
-    return health_store
-
-
-def ping_aodp(base_url: str, session: Optional[requests.Session] = None) -> bool:
-    """Ping the AODP API to update health status.
-
-    The same base URL used for price requests is hit with a tiny
-    endpoint.  Consecutive failures are counted and only after three
-    failures will the ``aodp_online`` flag flip to ``False``.  HTTP 429
-    responses are treated as *online* (rate limited) and reset the fail
-    counter.
-    """
-
-    session = session or requests.Session()
-    base = base_for(base_url)
-    url = build_prices_url(base, "T4_BAG", "Lymhurst", "1")
+def ping_aodp(active_server: str, session: requests.Session):
+    base = base_for(active_server)
+    url, params = build_prices_request(base, ["T4_BAG"], ["Lymhurst"], "1")
     try:
-        resp = session.get(url, timeout=(3, 5))
-        code = resp.status_code
+        r = session.get(url, params=params, timeout=(3,5))
+        code = r.status_code
         if code == 429:
-            online = True
-        else:
-            resp.raise_for_status()
-            online = True
-        if online:
-            if not health_store.aodp_online or health_store.fail_count != 0:
-                health_store.aodp_online = True
-                health_store.fail_count = 0
-                health_store.last_checked = datetime.now(timezone.utc)
-                _emit_change()
-            else:
-                health_store.last_checked = datetime.now(timezone.utc)
-            logger.info(
-                "Health ping: %s status=%s online=%s fails=%d",
-                url,
-                code,
-                True,
-                health_store.fail_count,
-            )
-            return True
-    except Exception:  # pragma: no cover - requests mocked in tests
-        health_store.fail_count += 1
-        health_store.last_checked = datetime.now(timezone.utc)
-        if health_store.fail_count >= 3 and health_store.aodp_online:
-            health_store.aodp_online = False
-            _emit_change()
-        logger.info(
-            "Health ping: %s status=%s online=%s fails=%d",
-            url,
-            "err",
-            False,
-            health_store.fail_count,
-        )
-        return False
+            store._fails = 0
+            store.set_online(True); return
+        if code == 200:
+            _ = r.json()
+            store._fails = 0
+            store.set_online(True); return
+        store._fails += 1
+    except Exception:
+        store._fails += 1
+    if store._fails >= 3:
+        store.set_online(False)
 
-
-__all__ = ["health_store", "update_aodp_status", "ping_aodp"]
+def mark_online_on_data_success():
+    store._fails = 0
+    store.set_online(True)

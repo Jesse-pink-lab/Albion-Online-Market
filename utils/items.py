@@ -2,8 +2,8 @@
 
 The real application ships with a large catalogue of item codes inside
 ``recipes/items.txt``.  For the purposes of the tests we expose a very
-small helper that can parse user input and optionally return the entire
-catalogue when the input is empty and ``fetch_all`` is requested.
+small helper that can parse user input and return the entire catalogue
+when requested separately.
 """
 
 from __future__ import annotations
@@ -12,19 +12,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-
 CATALOG_FILE = Path(__file__).resolve().parents[1] / "recipes" / "items.txt"
-
 
 @lru_cache()
 def load_catalog() -> List[str]:
-    """Return the full item catalogue.
-
-    The catalogue file is a simple list of item codes with comments
-    beginning with ``#``.  The function is cached so that repeated calls
-    are inexpensive.
-    """
-
+    """Return the full item catalogue."""
     items: List[str] = []
     try:
         with CATALOG_FILE.open("r", encoding="utf-8") as fh:
@@ -36,33 +28,13 @@ def load_catalog() -> List[str]:
         pass
     return items
 
-
-def parse_items(raw: str, fetch_all: bool = False) -> List[str]:
-    """Parse comma separated ``raw`` string into item codes.
-
-    Parameters
-    ----------
-    raw:
-        Raw user input.  Items are separated by commas.  Whitespace is
-        stripped and codes are upper-cased.  An empty string results in
-        an empty list unless ``fetch_all`` is ``True``.
-    fetch_all:
-        When ``True`` and ``raw`` is empty, the complete catalogue is
-        returned.
-    """
-
+def parse_items(raw: str | None) -> List[str]:
+    """Parse comma separated ``raw`` string into UPPERCASE item codes."""
     raw = (raw or "").strip()
-    if raw:
-        return [t.strip().upper() for t in raw.split(",") if t.strip()]
-    if fetch_all:
-        return list(load_catalog())
-    return []
-
+    return [t.strip().upper() for t in raw.split(",") if t.strip()]
 
 def items_catalog_codes() -> List[str]:
     """Return a list of all known item codes."""
     return list(load_catalog())
 
-
 __all__ = ["parse_items", "load_catalog", "items_catalog_codes"]
-
