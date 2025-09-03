@@ -26,6 +26,12 @@ aodp:
   chunk_size: 40
   rate_delay_seconds: 1
   timeout_seconds: 30
+max_concurrency: 4
+global_rate_per_sec: 2.0
+global_rate_capacity: 4
+cache_ttl_sec: 120
+city_batch_size: 3
+only_visible_first: true
 uploader:
   enabled: true
   ingest_base: "http+pow://albion-online-data.com"

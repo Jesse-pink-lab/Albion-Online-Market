@@ -99,19 +99,34 @@ class SettingsWidget(QWidget):
         self.rate_delay_spin.setSingleStep(0.1)
         api_layout.addWidget(self.rate_delay_spin, row, 1)
         row += 1
-        
+
         # Timeout
         api_layout.addWidget(QLabel("Request Timeout (seconds):"), row, 0)
         self.timeout_spin = QSpinBox()
         self.timeout_spin.setRange(5, 120)
         api_layout.addWidget(self.timeout_spin, row, 1)
         row += 1
-        
-        # Chunk size
-        api_layout.addWidget(QLabel("Items per Request:"), row, 0)
-        self.chunk_size_spin = QSpinBox()
-        self.chunk_size_spin.setRange(1, 300)
-        api_layout.addWidget(self.chunk_size_spin, row, 1)
+
+        # Max concurrency
+        api_layout.addWidget(QLabel("Max Concurrency:"), row, 0)
+        self.max_conc_spin = QSpinBox()
+        self.max_conc_spin.setRange(1, 8)
+        api_layout.addWidget(self.max_conc_spin, row, 1)
+        row += 1
+
+        # Global rate
+        api_layout.addWidget(QLabel("Global Rate (req/s):"), row, 0)
+        self.global_rate_spin = QDoubleSpinBox()
+        self.global_rate_spin.setRange(0.5, 5.0)
+        self.global_rate_spin.setSingleStep(0.1)
+        api_layout.addWidget(self.global_rate_spin, row, 1)
+        row += 1
+
+        # Cache TTL
+        api_layout.addWidget(QLabel("Cache TTL (seconds):"), row, 0)
+        self.cache_ttl_spin = QSpinBox()
+        self.cache_ttl_spin.setRange(0, 300)
+        api_layout.addWidget(self.cache_ttl_spin, row, 1)
         row += 1
         
         parent_layout.addWidget(api_group)
@@ -283,13 +298,25 @@ class SettingsWidget(QWidget):
         self.auto_refresh_spin.setSuffix(" minutes (0 = disabled)")
         app_layout.addWidget(self.auto_refresh_spin, row, 1)
         row += 1
-        
+
         # Data freshness
         app_layout.addWidget(QLabel("Max Data Age:"), row, 0)
         self.max_age_spin = QSpinBox()
         self.max_age_spin.setRange(1, 168)  # 1 hour to 1 week
         self.max_age_spin.setSuffix(" hours")
         app_layout.addWidget(self.max_age_spin, row, 1)
+        row += 1
+
+        # City batch size
+        app_layout.addWidget(QLabel("City Batch Size:"), row, 0)
+        self.city_batch_spin = QSpinBox()
+        self.city_batch_spin.setRange(1, 7)
+        app_layout.addWidget(self.city_batch_spin, row, 1)
+        row += 1
+
+        # Only refresh visible first
+        self.visible_first_check = QCheckBox("Only refresh visible pages first")
+        app_layout.addWidget(self.visible_first_check, row, 0, 1, 2)
         row += 1
         
         # Log level
@@ -333,10 +360,9 @@ class SettingsWidget(QWidget):
             self.api_url_edit.setText(aodp_config.get('base_url', ''))
             self.rate_delay_spin.setValue(aodp_config.get('rate_delay_seconds', 1.0))
             self.timeout_spin.setValue(aodp_config.get('timeout_seconds', 30))
-            chunk_val = self.config.get('items_per_request')
-            if chunk_val is None:
-                chunk_val = aodp_config.get('chunk_size', 150)
-            self.chunk_size_spin.setValue(chunk_val)
+            self.max_conc_spin.setValue(self.config.get('max_concurrency', 4))
+            self.global_rate_spin.setValue(self.config.get('global_rate_per_sec', 2.0))
+            self.cache_ttl_spin.setValue(self.config.get('cache_ttl_sec', 120))
 
             # Trading settings
             self.premium_check.setChecked(self.config.get('premium_enabled', True))
@@ -353,10 +379,12 @@ class SettingsWidget(QWidget):
             # App settings
             app_config = self.config.get('app', {})
             self.auto_refresh_spin.setValue(app_config.get('auto_refresh_minutes', 0))
-            
+            self.city_batch_spin.setValue(self.config.get('city_batch_size', 3))
+            self.visible_first_check.setChecked(self.config.get('only_visible_first', True))
+
             freshness_config = self.config.get('freshness', {})
             self.max_age_spin.setValue(freshness_config.get('max_age_hours', 24))
-            
+
             logging_config = self.config.get('logging', {})
             # Migration: handle old app.log_level
             if 'log_level' in app_config and 'level' not in logging_config:
@@ -390,9 +418,9 @@ class SettingsWidget(QWidget):
             config['aodp']['base_url'] = self.api_url_edit.text()
             config['aodp']['rate_delay_seconds'] = self.rate_delay_spin.value()
             config['aodp']['timeout_seconds'] = self.timeout_spin.value()
-            chunk_val = self.chunk_size_spin.value()
-            config['aodp']['chunk_size'] = chunk_val
-            config['items_per_request'] = chunk_val
+            config['max_concurrency'] = self.max_conc_spin.value()
+            config['global_rate_per_sec'] = self.global_rate_spin.value()
+            config['cache_ttl_sec'] = self.cache_ttl_spin.value()
             
             # Trading settings
             config['premium_enabled'] = self.premium_check.isChecked()
@@ -411,6 +439,8 @@ class SettingsWidget(QWidget):
             if 'app' not in config:
                 config['app'] = {}
             config['app']['auto_refresh_minutes'] = self.auto_refresh_spin.value()
+            config['city_batch_size'] = self.city_batch_spin.value()
+            config['only_visible_first'] = self.visible_first_check.isChecked()
             config['app'].pop('log_level', None)
             if 'logging' not in config:
                 config['logging'] = {}
