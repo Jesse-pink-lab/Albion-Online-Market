@@ -69,8 +69,10 @@ def fetch_prices(
             if cancel(): break
             results.extend(fut.result())
             if on_progress: on_progress(int(idx/len(chunks)*100), f"Fetched {idx}/{len(chunks)}")
-
-    return results
+    norm = normalize_and_dedupe(results)
+    signals.market_rows_updated.emit(norm)
+    emit_summary(norm)
+    return norm
 
 
 def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
