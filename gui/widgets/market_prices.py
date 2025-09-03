@@ -89,14 +89,13 @@ class MarketPricesWidget(QWidget):
         layout.addWidget(self.progress_label)
 
         body = QHBoxLayout()
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             [
                 "Item",
+                "Route",
                 "Buy (max)",
-                "Buy City",
                 "Sell (min)",
-                "Sell City",
                 "Spread",
                 "ROI%",
                 "Updated",
@@ -124,15 +123,15 @@ class MarketPricesWidget(QWidget):
         self.table.setRowCount(len(self.rows))
         for row_index, row in enumerate(self.rows):
             self.table.setItem(row_index, 0, QTableWidgetItem(row["item_id"]))
-            self.table.setItem(row_index, 1, QTableWidgetItem(str(row.get("buy_price_max"))))
-            self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_city"))))
+            route = f"{row.get('buy_city') or '-'} → {row.get('sell_city') or '-'}"
+            self.table.setItem(row_index, 1, QTableWidgetItem(route))
+            self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_price_max"))))
             self.table.setItem(row_index, 3, QTableWidgetItem(str(row.get("sell_price_min"))))
-            self.table.setItem(row_index, 4, QTableWidgetItem(str(row.get("sell_city"))))
-            self.table.setItem(row_index, 5, QTableWidgetItem(str(row.get("spread"))))
+            self.table.setItem(row_index, 4, QTableWidgetItem(str(row.get("spread"))))
             roi = row.get("roi_pct")
             self.table.setItem(
                 row_index,
-                6,
+                5,
                 QTableWidgetItem(f"{roi:.1f}" if roi is not None else ""),
             )
 
@@ -141,7 +140,7 @@ class MarketPricesWidget(QWidget):
             if dt:
                 item.setText(rel_age(dt))
                 item.setToolTip(fmt_tooltip(dt))
-            self.table.setItem(row_index, 7, item)
+            self.table.setItem(row_index, 6, item)
 
     def update_summary_from_selection(self) -> None:
         items = self.table.selectedItems()

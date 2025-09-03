@@ -86,6 +86,9 @@ class SettingsWidget(QWidget):
         # API base URL
         api_layout.addWidget(QLabel("API Base URL:"), row, 0)
         self.api_url_edit = QLineEdit()
+        # The base URL is derived from the selected server region and is
+        # provided here purely for diagnostics, so keep it read-only.
+        self.api_url_edit.setReadOnly(True)
         api_layout.addWidget(self.api_url_edit, row, 1)
         row += 1
         

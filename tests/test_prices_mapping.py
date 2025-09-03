@@ -50,7 +50,7 @@ def test_spread_roi_and_dates():
     widget = MarketPricesWidget(DummyMain())
     widget.rows = [norm]
     widget.populate_table()
-    cell = widget.table.item(0, 7)  # Updated column
+    cell = widget.table.item(0, 6)  # Updated column
     dt = norm["updated_dt"]
     assert cell.text() == rel_age(dt)
     assert cell.toolTip() == fmt_tooltip(dt)
