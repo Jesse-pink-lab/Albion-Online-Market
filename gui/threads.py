@@ -13,9 +13,13 @@ class RefreshWorker(QObject):
     progress = Signal(int, str)
     error = Signal(str)
 
-    def __init__(self, params: dict):
+    def __init__(self, params: dict, settings=None, itemsEdit=None):
         super().__init__()
         self.params = params
+        self.settings = settings
+        # optional text edit providing comma separated item list
+        if itemsEdit is not None:
+            self.itemsEdit = itemsEdit
         self._cancel = False
 
     def cancel(self):
@@ -25,15 +29,31 @@ class RefreshWorker(QObject):
         start = time.perf_counter()
         self.progress.emit(1, "Starting market refresh...")
         try:
-            from datasources import aodp
+            from services.market_prices import fetch_prices, normalize_and_dedupe
+            from datasources.http import get_shared_session
+            from core.health import mark_online_on_data_success
 
-            result = aodp.refresh_prices(
-                **self.params,
+            server = self.params.get("server")
+            cities = self.params.get("cities") or []
+            qualities = self.params.get("qualities") or []
+            items_text = self.itemsEdit.text() if hasattr(self, "itemsEdit") else ""
+
+            rows = fetch_prices(
+                server=server,
+                items_edit_text=items_text,
+                cities_sel=",".join(cities) if cities else "",
+                qual_sel=",".join(map(str, qualities)) if qualities else "",
+                session=get_shared_session(),
+                settings=self.settings,
                 on_progress=lambda p, m: self.progress.emit(p, m),
-                should_cancel=lambda: self._cancel,
+                cancel=lambda: self._cancel,
             )
+            norm = normalize_and_dedupe(rows)
+            if norm:
+                mark_online_on_data_success()
             elapsed = time.perf_counter() - start
-            self.finished.emit({"ok": True, "elapsed": elapsed, "result": result})
+            summary = {"items": len(norm), "records": len(rows)}
+            self.finished.emit({"ok": True, "elapsed": elapsed, "result": summary})
         except Exception as e:  # pragma: no cover - unexpected errors
             log.exception("RefreshWorker failed: %s", e)
             self.error.emit(str(e))

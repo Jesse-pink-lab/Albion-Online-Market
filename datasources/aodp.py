@@ -375,27 +375,27 @@ class AODPClient:
             self.session.close()
 
 
-def refresh_prices(server: str, city: str, qualities, on_progress=None, should_cancel=None):
-    """Refresh market prices from the AODP API.
+def refresh_prices(server: str, cities: list[str], qualities, items_text: str = "", settings=None, on_progress=None, should_cancel=None):
+    """Backward compatible wrapper that fetches real item data.
 
-    This helper wraps :class:`AODPClient` to provide progress and
-    cancellation hooks used by background workers.
+    This delegates to :func:`services.market_prices.fetch_prices` so tests that
+    import this legacy helper continue to work without the old placeholder
+    behaviour.
     """
 
-    client = AODPClient({"aodp": {"server": server}})
-    items = ["T4_BAG"]  # placeholder list of items
+    from services.market_prices import fetch_prices, normalize_and_dedupe
+    from datasources.http import get_shared_session
 
-    total_items = len(items)
-    records = 0
-
-    for idx, item in enumerate(items, 1):
-        if should_cancel and should_cancel():
-            break
-        prices = client.get_current_prices([item], [city], qualities)
-        records += len(prices)
-        if on_progress:
-            pct = int(idx / total_items * 100)
-            on_progress(pct, f"Fetched {item}")
-
-    return {"items": total_items, "records": records}
+    rows = fetch_prices(
+        server=server,
+        items_edit_text=items_text,
+        cities_sel=",".join(cities) if cities else "",
+        qual_sel=",".join(map(str, qualities)) if qualities else "",
+        session=get_shared_session(),
+        settings=settings,
+        on_progress=on_progress,
+        cancel=should_cancel,
+    )
+    norm = normalize_and_dedupe(rows)
+    return {"items": len(norm), "records": len(rows)}
 

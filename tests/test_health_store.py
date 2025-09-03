@@ -32,11 +32,11 @@ def test_health_requires_three_failures(monkeypatch):
     monkeypatch.setattr(aurl, "base_for", lambda s: s)
     store.aodp_online = True
     store._fails = 0
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert store.aodp_online
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert store.aodp_online
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert not store.aodp_online
 
 
@@ -48,7 +48,7 @@ def test_health_429_is_online(monkeypatch):
     monkeypatch.setattr(aurl, "base_for", lambda s: s)
     store.aodp_online = False
     store._fails = 5
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert store.aodp_online and store._fails == 0
 
 
@@ -62,8 +62,8 @@ def test_success_resets_failures(monkeypatch):
     monkeypatch.setattr(aurl, "base_for", lambda s: s)
     store.aodp_online = True
     store._fails = 0
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert store._fails == 1
-    ping_aodp("http://x", session)
+    ping_aodp("west", session)
     assert store.aodp_online and store._fails == 0
 
