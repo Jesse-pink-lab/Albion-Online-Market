@@ -365,10 +365,10 @@ def refresh_prices(server: str, cities: list[str], qualities, items_text: str = 
     behaviour.
     """
 
-    from services.market_prices import fetch_prices, normalize_and_dedupe
+    from services.market_prices import fetch_prices
     from datasources.http import get_shared_session
 
-    rows = fetch_prices(
+    norm = fetch_prices(
         server=server,
         items_edit_text=items_text,
         cities_sel=",".join(cities) if cities else "",
@@ -378,6 +378,5 @@ def refresh_prices(server: str, cities: list[str], qualities, items_text: str = 
         on_progress=on_progress,
         cancel=should_cancel,
     )
-    norm = normalize_and_dedupe(rows)
-    return {"items": len(norm), "records": len(rows)}
+    return {"items": len(norm), "records": len(norm)}
 

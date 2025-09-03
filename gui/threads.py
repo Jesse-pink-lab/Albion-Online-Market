@@ -1,6 +1,5 @@
 from PySide6.QtCore import QObject, QThread, Signal
 import time
-import traceback
 import logging
 
 log = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class RefreshWorker(QObject):
         start = time.perf_counter()
         self.progress.emit(1, "Starting market refresh...")
         try:
-            from services.market_prices import fetch_prices, normalize_and_dedupe, emit_summary
+            from services.market_prices import fetch_prices
             from datasources.http import get_shared_session
             from core.health import mark_online_on_data_success
 
@@ -38,7 +37,7 @@ class RefreshWorker(QObject):
             qualities = self.params.get("qualities") or []
             items_text = self.itemsEdit.text() if hasattr(self, "itemsEdit") else ""
 
-            rows = fetch_prices(
+            norm = fetch_prices(
                 server=server,
                 items_edit_text=items_text,
                 cities_sel=",".join(cities) if cities else "",
@@ -48,16 +47,14 @@ class RefreshWorker(QObject):
                 on_progress=lambda p, m: self.progress.emit(p, m),
                 cancel=lambda: self._cancel,
             )
-            norm = normalize_and_dedupe(rows)
             if norm:
                 mark_online_on_data_success()
-            emit_summary(norm)
             elapsed = time.perf_counter() - start
             log.info(
                 "Market refresh completed: items=%s records=%s elapsed=%.2fs",
-                len(norm), len(rows), elapsed,
+                len(norm), len(norm), elapsed,
             )
-            summary = {"items": len(norm), "records": len(rows)}
+            summary = {"items": len(norm), "records": len(norm)}
             self.finished.emit({"ok": True, "elapsed": elapsed, "result": summary})
         except Exception as e:  # pragma: no cover - unexpected errors
             log.exception("RefreshWorker failed: %s", e)

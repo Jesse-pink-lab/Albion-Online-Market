@@ -27,6 +27,7 @@ from gui.widgets.crafting_optimizer import CraftingOptimizerWidget
 from gui.widgets.settings import SettingsWidget
 from gui.widgets.data_manager import DataManagerWidget
 from gui.widgets.market_prices import MarketPricesWidget
+from gui.widgets.items_browser import ItemsBrowser
 
 # Import backend components
 from engine.config import ConfigManager
@@ -99,7 +100,11 @@ class MainWindow(QMainWindow):
         # Market Prices tab
         self.market_prices_widget = MarketPricesWidget(self)
         self.tab_widget.addTab(self.market_prices_widget, "💹 Prices")
-        
+
+        # Items tab
+        self.items_browser = ItemsBrowser(self)
+        self.tab_widget.addTab(self.items_browser, "📦 Items")
+
         # Settings tab
         self.settings_widget = SettingsWidget(self)
         self.tab_widget.addTab(self.settings_widget, "⚙️ Settings")
