@@ -15,21 +15,17 @@ from typing import Dict, Iterable, List, Optional
 
 import requests
 
-from datasources.aodp import SERVER_BASE, SESSION
+from datasources.aodp import SESSION
+from datasources.aodp_url import (
+    base_for,
+    build_prices_url as _build_prices_url,
+    DEFAULT_CITIES,
+)
 from utils.timefmt import to_utc
 
 logger = logging.getLogger(__name__)
 
 # Default locations and qualities when the UI fields are empty
-DEFAULT_CITIES = [
-    "Bridgewatch",
-    "Caerleon",
-    "Fort Sterling",
-    "Lymhurst",
-    "Martlock",
-    "Thetford",
-    "Black Market",
-]
 DEFAULT_QUALITIES = [1, 2, 3, 4]
 
 
@@ -41,11 +37,11 @@ def build_prices_url(
 ) -> str:
     """Construct the prices endpoint URL for the given arguments."""
 
-    base = SERVER_BASE.get(server, SERVER_BASE["europe"])
+    base = base_for(server)
     items_str = ",".join(items)
     locs = ",".join(locations)
     quals = ",".join(str(q) for q in qualities)
-    return f"{base}/api/v2/stats/prices/{items_str}.json?locations={locs}&qualities={quals}"
+    return _build_prices_url(base, items_str, locs, quals)
 
 
 def _fetch_chunk(url: str, session: requests.Session) -> List[Dict[str, object]]:
@@ -56,12 +52,16 @@ def _fetch_chunk(url: str, session: requests.Session) -> List[Dict[str, object]]
         logger.debug("Fetching %s attempt=%s", url, attempt)
         resp = session.get(url, timeout=(5, 10))
         if resp.status_code in {429} or resp.status_code >= 500:
+            logger.warning("AODP backoff: attempt=%d status=%s", attempt, resp.status_code)
             if attempt == len(delays):
+                logger.info("AODP RESP: status=%s records=%d", resp.status_code, 0)
                 resp.raise_for_status()
             time.sleep(delay)
             continue
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        logger.info("AODP RESP: status=%s records=%d", resp.status_code, len(data))
+        return data
     return []  # pragma: no cover - should never reach
 
 
@@ -87,11 +87,23 @@ def fetch_prices(
     locs = list(locations) if locations else list(DEFAULT_CITIES)
     quals = list(qualities) if qualities else list(DEFAULT_QUALITIES)
 
+    base = base_for(server)
+    quals_csv = ",".join(str(q) for q in quals)
+
     raw_records: List[Dict[str, object]] = []
     for i in range(0, len(items), chunk_size):
         chunk = items[i : i + chunk_size]
-        url = build_prices_url(server, chunk, locs, quals)
-        logger.info("chunk %s items=%d", url, len(chunk))
+        items_csv = ",".join(chunk)
+        cities_csv = ",".join(locs)
+        url = _build_prices_url(base, items_csv, cities_csv, quals_csv)
+        logger.info(
+            "AODP GET: base=%s items=%d cities=%d quals=%s",
+            base,
+            len(chunk),
+            len(locs),
+            quals_csv,
+        )
+        logger.debug("AODP URL: %s", url)
         data = _fetch_chunk(url, session)
         raw_records.extend(data)
 

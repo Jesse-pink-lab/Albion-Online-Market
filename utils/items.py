@@ -44,8 +44,8 @@ def parse_items(raw: str, fetch_all: bool = False) -> List[str]:
     ----------
     raw:
         Raw user input.  Items are separated by commas.  Whitespace is
-        stripped.  An empty string results in an empty list unless
-        ``fetch_all`` is ``True``.
+        stripped and codes are upper-cased.  An empty string results in
+        an empty list unless ``fetch_all`` is ``True``.
     fetch_all:
         When ``True`` and ``raw`` is empty, the complete catalogue is
         returned.
@@ -53,11 +53,16 @@ def parse_items(raw: str, fetch_all: bool = False) -> List[str]:
 
     raw = (raw or "").strip()
     if raw:
-        return [t.strip() for t in raw.split(",") if t.strip()]
+        return [t.strip().upper() for t in raw.split(",") if t.strip()]
     if fetch_all:
         return list(load_catalog())
     return []
 
 
-__all__ = ["parse_items", "load_catalog"]
+def items_catalog_codes() -> List[str]:
+    """Return a list of all known item codes."""
+    return list(load_catalog())
+
+
+__all__ = ["parse_items", "load_catalog", "items_catalog_codes"]
 

@@ -7,6 +7,7 @@ from typing import Optional
 
 import requests
 
+from datasources.aodp_url import base_for, build_prices_url
 from .signals import signals
 
 logger = logging.getLogger(__name__)
@@ -50,32 +51,45 @@ def ping_aodp(base_url: str, session: Optional[requests.Session] = None) -> bool
     """
 
     session = session or requests.Session()
-    url = f"{base_url}/api/v2/stats/prices/T4_BAG.json?locations=Lymhurst&qualities=1"
+    base = base_for(base_url)
+    url = build_prices_url(base, "T4_BAG", "Lymhurst", "1")
     try:
-        resp = session.get(url, timeout=(5, 10))
-        if resp.status_code == 429:
-            # Rate limited but server is reachable
+        resp = session.get(url, timeout=(3, 5))
+        code = resp.status_code
+        if code == 429:
+            online = True
+        else:
+            resp.raise_for_status()
+            online = True
+        if online:
             if not health_store.aodp_online or health_store.fail_count != 0:
                 health_store.aodp_online = True
                 health_store.fail_count = 0
                 health_store.last_checked = datetime.now(timezone.utc)
                 _emit_change()
+            else:
+                health_store.last_checked = datetime.now(timezone.utc)
+            logger.info(
+                "Health ping: %s status=%s online=%s fails=%d",
+                url,
+                code,
+                True,
+                health_store.fail_count,
+            )
             return True
-        resp.raise_for_status()
-        if not health_store.aodp_online or health_store.fail_count != 0:
-            health_store.aodp_online = True
-            health_store.fail_count = 0
-            health_store.last_checked = datetime.now(timezone.utc)
-            _emit_change()
-        else:
-            health_store.last_checked = datetime.now(timezone.utc)
-        return True
     except Exception:  # pragma: no cover - requests mocked in tests
         health_store.fail_count += 1
         health_store.last_checked = datetime.now(timezone.utc)
         if health_store.fail_count >= 3 and health_store.aodp_online:
             health_store.aodp_online = False
             _emit_change()
+        logger.info(
+            "Health ping: %s status=%s online=%s fails=%d",
+            url,
+            "err",
+            False,
+            health_store.fail_count,
+        )
         return False
 
 
