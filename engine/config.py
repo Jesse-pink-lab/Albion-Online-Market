@@ -6,12 +6,11 @@ Handles loading and managing application configuration from YAML files.
 
 import logging
 import os
-import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import yaml
-from platformdirs import user_config_dir
+from utils.paths import CONFIG_PATH, DB_PATH, LOG_DIR
 
 
 class ConfigManager:
@@ -24,9 +23,7 @@ class ConfigManager:
         if config_path:
             self.config_path = Path(config_path)
         else:
-            app_dir = Path(user_config_dir("AlbionTradeOptimizer", roaming=True))
-            os.makedirs(app_dir, exist_ok=True)
-            self.config_path = app_dir / "config.yaml"
+            self.config_path = CONFIG_PATH
         
         self._config = None
     
@@ -187,12 +184,12 @@ class ConfigManager:
                 'description': "Trade optimization tool for Albion Online"
             },
             'database': {
-                'path': "data/albion_trade.db",
+                'path': str(DB_PATH),
                 'backup_count': 5
             },
             'logging': {
                 'level': "INFO",
-                'file': "logs/albion_trade.log",
+                'file': str(LOG_DIR / "app.log"),
                 'max_size_mb': 10,
                 'backup_count': 5
             },
