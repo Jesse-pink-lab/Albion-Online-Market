@@ -45,6 +45,14 @@ def rel_age(utc_dt: datetime) -> str:
 
 
 def fmt_tooltip(utc_dt: datetime) -> str:
-    """Return ISO8601 string suitable for tooltips."""
+    """Return formatted UTC timestamp suitable for tooltips.
 
-    return utc_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    The specification for the UI requires a slightly more human friendly
+    representation than :func:`datetime.isoformat`; the ``T`` separator is
+    replaced with a space, e.g. ``"2024-01-02 03:04:05Z"``.
+    """
+
+    return utc_dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
+__all__ = ["to_utc", "rel_age", "fmt_tooltip"]

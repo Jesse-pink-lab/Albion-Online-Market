@@ -1,32 +1,44 @@
-from PySide6.QtCore import QCoreApplication
-
-from PySide6.QtCore import QCoreApplication
 import sys, pathlib
-
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
-from core.health import update_aodp_status
-from core.signals import signals
+import types
+from core.health import health_store, ping_aodp
 
 
-app = QCoreApplication.instance() or QCoreApplication([])
+class DummyResp:
+    def __init__(self, status):
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400 and self.status_code != 429:
+            raise Exception("error")
 
 
-def test_health_signal_updates_receivers():
-    received = []
-    received2 = []
+def test_health_requires_three_failures():
+    statuses = [500, 500, 500]
 
-    def handler(store):
-        received.append(store)
+    def fake_get(url, timeout=None):
+        return DummyResp(statuses.pop(0))
 
-    def handler2(store):
-        received2.append(store)
+    session = types.SimpleNamespace(get=fake_get)
+    health_store.aodp_online = True
+    health_store.fail_count = 0
+    ping_aodp("http://x", session)
+    assert health_store.aodp_online
+    ping_aodp("http://x", session)
+    assert health_store.aodp_online
+    ping_aodp("http://x", session)
+    assert not health_store.aodp_online
 
-    signals.health_changed.connect(handler)
-    signals.health_changed.connect(handler2)
 
-    update_aodp_status(True)
+def test_health_429_is_online():
+    statuses = [429]
 
-    assert received and received2
-    assert received[-1].aodp_online is True
-    assert received2[-1].aodp_online is True
+    def fake_get(url, timeout=None):
+        return DummyResp(statuses.pop(0))
+
+    session = types.SimpleNamespace(get=fake_get)
+    health_store.aodp_online = False
+    health_store.fail_count = 5
+    ping_aodp("http://x", session)
+    assert health_store.aodp_online and health_store.fail_count == 0

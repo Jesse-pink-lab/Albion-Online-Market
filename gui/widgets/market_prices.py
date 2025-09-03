@@ -6,9 +6,7 @@ import logging
 from typing import Any, Dict, List
 from datetime import datetime
 
-import requests
 from PySide6.QtCore import Qt, QThread
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -37,7 +35,6 @@ class MarketPricesWidget(QWidget):
         self.main_window = main_window
         self.logger = logging.getLogger(__name__)
         self.rows: List[Dict[str, Any]] = []
-        self.summary: Dict[str, Dict[str, Any]] = {}
         self.refresh_running = False
         self.refresh_pending = False
         self.init_ui()
@@ -94,19 +91,17 @@ class MarketPricesWidget(QWidget):
         layout.addWidget(self.progress_label)
 
         body = QHBoxLayout()
-        self.table = QTableWidget(0, 10)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             [
-                "Icon",
                 "Item",
-                "City",
-                "Quality",
-                "Sell Min",
-                "Sell Max",
-                "Buy Max",
-                "Buy Min",
-                "Updated Sell",
-                "Updated Buy",
+                "Buy (max)",
+                "Buy City",
+                "Sell (min)",
+                "Sell City",
+                "Spread",
+                "ROI%",
+                "Updated",
             ]
         )
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -136,76 +131,49 @@ class MarketPricesWidget(QWidget):
         server = self.server_combo.currentText()
 
         try:
-            rows, summary = fetch_prices(items, cities, qualities, server)
+            rows = fetch_prices(items, cities, qualities, server)
         except Exception as exc:  # pragma: no cover - network errors
             self.logger.error("Failed to fetch prices: %s", exc)
             return
 
         self.rows = rows
-        self.summary = summary
         self.populate_table()
 
     def populate_table(self) -> None:
         self.table.setRowCount(len(self.rows))
         for row_index, row in enumerate(self.rows):
-            # Icon
-            icon_label = QLabel()
-            try:
-                response = requests.get(row["icon_url"], timeout=30)
-                pixmap = QPixmap()
-                pixmap.loadFromData(response.content)
-                icon_label.setPixmap(pixmap.scaled(40, 40, Qt.KeepAspectRatio))
-            except Exception:  # pragma: no cover - network failure
-                pass
-            self.table.setCellWidget(row_index, 0, icon_label)
+            self.table.setItem(row_index, 0, QTableWidgetItem(row["item_id"]))
+            self.table.setItem(row_index, 1, QTableWidgetItem(str(row.get("buy_price_max"))))
+            self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_city"))))
+            self.table.setItem(row_index, 3, QTableWidgetItem(str(row.get("sell_price_min"))))
+            self.table.setItem(row_index, 4, QTableWidgetItem(str(row.get("sell_city"))))
+            self.table.setItem(row_index, 5, QTableWidgetItem(str(row.get("spread"))))
+            roi = row.get("roi_pct")
+            self.table.setItem(row_index, 6, QTableWidgetItem(f"{roi:.2f}" if roi is not None else ""))
 
-            self.table.setItem(row_index, 1, QTableWidgetItem(row["item_id"]))
-            self.table.setItem(row_index, 2, QTableWidgetItem(row["city"]))
-            self.table.setItem(row_index, 3, QTableWidgetItem(str(row["quality"])))
-            self.table.setItem(row_index, 4, QTableWidgetItem(str(row["sell_min"])))
-            self.table.setItem(row_index, 5, QTableWidgetItem(str(row["sell_max"])))
-            self.table.setItem(row_index, 6, QTableWidgetItem(str(row["buy_max"])))
-            self.table.setItem(row_index, 7, QTableWidgetItem(str(row["buy_min"])))
-
-            sell_dt = row.get("last_update_sell")
+            dt = row.get("buy_date") or row.get("sell_date")
             item = QTableWidgetItem("")
-            if sell_dt:
-                dt = to_utc(sell_dt)
+            if dt:
                 item.setText(rel_age(dt))
                 item.setToolTip(fmt_tooltip(dt))
-            self.table.setItem(row_index, 8, item)
-
-            buy_dt = row.get("last_update_buy")
-            item = QTableWidgetItem("")
-            if buy_dt:
-                dt = to_utc(buy_dt)
-                item.setText(rel_age(dt))
-                item.setToolTip(fmt_tooltip(dt))
-            self.table.setItem(row_index, 9, item)
+            self.table.setItem(row_index, 7, item)
 
     def update_summary_from_selection(self) -> None:
         items = self.table.selectedItems()
         if not items:
             self.best_buy_label.setText("Best Buy: -")
-            self.best_sell_label.setText("Best Sell: -")
             return
-        item_id = self.table.item(self.table.currentRow(), 1).text()
-        info = self.summary.get(item_id)
-        if not info:
-            return
-        bb = info.get("sell_price_min", {})
-        bs = info.get("buy_price_max", {})
-        age = None
-        if bs.get("date"):
-            dt = to_utc(bs["date"])
-            age = rel_age(dt)
-        if bb.get("city") is not None and bs.get("city") is not None:
+        row = self.rows[self.table.currentRow()]
+        buy = row.get("buy_city"), row.get("buy_price_max")
+        sell = row.get("sell_city"), row.get("sell_price_min")
+        dt = row.get("sell_date") or row.get("buy_date")
+        age = rel_age(dt) if dt else "?"
+        if buy[0] and sell[0]:
             self.best_buy_label.setText(
-                f"Buy @ {bb['city']} {bb['price']} | Sell @ {bs['city']} {bs['price']} ({age or '?'})"
+                f"Buy @ {buy[0]} {buy[1]} | Sell @ {sell[0]} {sell[1]} ({age})"
             )
         else:
             self.best_buy_label.setText("Best Buy: -")
-        self.best_sell_label.setText("")
 
     # ------------------------------------------------------------------
     # Refresh handling

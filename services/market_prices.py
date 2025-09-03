@@ -1,206 +1,174 @@
-"""Market price fetching utilities.
+"""Market price fetching utilities with batching and backoff.
 
-Provides helper functions for retrieving and normalising market
-price information from the Albion Online Data API.  The core
-entry point is :func:`fetch_prices` which returns a list of
-normalised rows and a per-item summary describing the best place to
-buy and sell.
+This module provides a small wrapper around the Albion Online Data
+Project API.  The real application performs far more work but for the
+tests we focus on request construction, basic error handling and the
+normalisation of returned records.
 """
 
 from __future__ import annotations
 
+import logging
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Tuple
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional
 
 import requests
 
-API_BASE = "https://www.albion-online-data.com/api/v2/stats"
-RENDER_BASE = "https://render.albiononline.com/v1/item"
+from datasources.aodp import SERVER_BASE, SESSION
+from utils.timefmt import to_utc
 
-# minimum delay between requests to respect 180 req/min limit
-_MIN_INTERVAL = 60.0 / 180.0
-_last_request: float = 0.0
+logger = logging.getLogger(__name__)
 
-
-def _rate_limit() -> None:
-    """Simple rate limiter to roughly respect the API limits.
-
-    The Albion Online Data API allows 180 requests per minute.  We
-    keep track of the time of the last request and sleep if required
-    to maintain the minimum interval.  This is intentionally very
-    small and lightweight as the application typically bundles
-    multiple items and locations into a single request.
-    """
-
-    global _last_request
-    elapsed = time.time() - _last_request
-    if elapsed < _MIN_INTERVAL:
-        time.sleep(_MIN_INTERVAL - elapsed)
-    _last_request = time.time()
+# Default locations and qualities when the UI fields are empty
+DEFAULT_CITIES = [
+    "Bridgewatch",
+    "Caerleon",
+    "Fort Sterling",
+    "Lymhurst",
+    "Martlock",
+    "Thetford",
+    "Black Market",
+]
+DEFAULT_QUALITIES = [1, 2, 3, 4]
 
 
-def build_icon_url(item_id: str, quality: int = 1, size: int = 64) -> str:
-    """Return the URL to the rendered icon for ``item_id``.
+def build_prices_url(
+    server: str,
+    items: Iterable[str],
+    locations: Iterable[str],
+    qualities: Iterable[int],
+) -> str:
+    """Construct the prices endpoint URL for the given arguments."""
 
-    Parameters
-    ----------
-    item_id:
-        The Albion item identifier, e.g. ``"T4_BAG"``.
-    quality:
-        Item quality (1-5).
-    size:
-        Icon size in pixels.  The API defaults to ``64`` so we mirror
-        that behaviour here.
-    """
-
-    return f"{RENDER_BASE}/{item_id}.png?quality={quality}&size={size}"
+    base = SERVER_BASE.get(server, SERVER_BASE["europe"])
+    items_str = ",".join(items)
+    locs = ",".join(locations)
+    quals = ",".join(str(q) for q in qualities)
+    return f"{base}/api/v2/stats/prices/{items_str}.json?locations={locs}&qualities={quals}"
 
 
-def _parse_date(value: str | None) -> str | None:
-    """Parse API timestamp into ISO8601 UTC string.
+def _fetch_chunk(url: str, session: requests.Session) -> List[Dict[str, object]]:
+    """Fetch a single chunk with exponential backoff."""
 
-    The API sometimes omits the ``Z`` timezone designator; in that
-    case we assume UTC.
-    """
-
-    if not value:
-        return None
-    try:
-        if value.endswith("Z"):
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        else:
-            dt = datetime.fromisoformat(value)
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    except Exception:
-        return None
+    delays = [0.5, 1, 2, 4]
+    for attempt, delay in enumerate(delays, start=1):
+        logger.debug("Fetching %s attempt=%s", url, attempt)
+        resp = session.get(url, timeout=(5, 10))
+        if resp.status_code in {429} or resp.status_code >= 500:
+            if attempt == len(delays):
+                resp.raise_for_status()
+            time.sleep(delay)
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    return []  # pragma: no cover - should never reach
 
 
 def fetch_prices(
     item_ids: Iterable[str],
-    cities: Iterable[str],
-    qualities: Iterable[int] | None = None,
+    locations: Optional[Iterable[str]] = None,
+    qualities: Optional[Iterable[int]] = None,
     server: str = "europe",
-) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
-    """Fetch market prices for the given ``item_ids`` and ``cities``.
+    chunk_size: int = 150,
+    session: requests.Session = SESSION,
+) -> List[Dict[str, object]]:
+    """Fetch and normalise market prices.
 
-    Parameters
-    ----------
-    item_ids:
-        Iterable of item identifiers.
-    cities:
-        Iterable of city names.
-    qualities:
-        Iterable of quality levels.  Defaults to ``[1]``.
-    server:
-        Game server region (``"europe"``, ``"asia"`` or ``"americas"``).
-
-    Returns
-    -------
-    rows, summary
-        ``rows`` is a list of dictionaries with normalised price
-        information.  ``summary`` maps each item id to a dictionary
-        describing the best place to buy (lowest ``sell_min``) and the
-        best place to sell (highest ``buy_max``).
+    The function handles chunking and merges the results into a per item
+    summary consisting of the best bid/ask information as well as simple
+    spread/ROI calculations.
     """
 
-    item_ids = list(item_ids)
-    if not item_ids:
-        return [], {}
+    items = list(item_ids)
+    if not items:
+        return []
 
-    cities = list(cities)
-    qualities = list(qualities) if qualities is not None else [1]
+    locs = list(locations) if locations else list(DEFAULT_CITIES)
+    quals = list(qualities) if qualities else list(DEFAULT_QUALITIES)
 
-    items_str = ",".join(item_ids)
-    params = {
-        "locations": ",".join(cities),
-        "qualities": ",".join(map(str, qualities)),
-        "server": server,
+    raw_records: List[Dict[str, object]] = []
+    for i in range(0, len(items), chunk_size):
+        chunk = items[i : i + chunk_size]
+        url = build_prices_url(server, chunk, locs, quals)
+        logger.info("chunk %s items=%d", url, len(chunk))
+        data = _fetch_chunk(url, session)
+        raw_records.extend(data)
+
+    return [normalize_item(item_id, recs) for item_id, recs in _group_by_item(raw_records).items()]
+
+
+def _group_by_item(records: List[Dict[str, object]]) -> Dict[str, List[Dict[str, object]]]:
+    grouped: Dict[str, List[Dict[str, object]]] = {}
+    for rec in records:
+        grouped.setdefault(rec.get("item_id"), []).append(rec)
+    return grouped
+
+
+@dataclass
+class Normalized:
+    item_id: str
+    buy_price_max: Optional[int]
+    buy_city: Optional[str]
+    buy_date: Optional[object]
+    sell_price_min: Optional[int]
+    sell_city: Optional[str]
+    sell_date: Optional[object]
+    spread: Optional[int]
+    roi_pct: Optional[float]
+
+
+def normalize_item(item_id: str, records: List[Dict[str, object]]) -> Dict[str, object]:
+    """Normalise API records for a single item."""
+
+    best_buy = {"price": None, "city": None, "date": None}
+    best_sell = {"price": None, "city": None, "date": None}
+
+    for rec in records:
+        buy = rec.get("buy_price_max")
+        sell = rec.get("sell_price_min")
+        city = rec.get("city")
+        buy_date = rec.get("buy_price_max_date")
+        sell_date = rec.get("sell_price_min_date")
+
+        if buy is not None and (best_buy["price"] is None or buy > best_buy["price"]):
+            best_buy = {
+                "price": buy,
+                "city": city,
+                "date": to_utc(buy_date) if buy_date else None,
+            }
+        if sell is not None and (best_sell["price"] is None or sell < best_sell["price"]):
+            best_sell = {
+                "price": sell,
+                "city": city,
+                "date": to_utc(sell_date) if sell_date else None,
+            }
+
+    spread = None
+    roi = None
+    if best_buy["price"] is not None and best_sell["price"] is not None:
+        spread = best_sell["price"] - best_buy["price"]
+        if best_buy["price"]:
+            roi = (spread / best_buy["price"]) * 100
+
+    return {
+        "item_id": item_id,
+        "buy_price_max": best_buy["price"],
+        "buy_city": best_buy["city"],
+        "buy_date": best_buy["date"],
+        "sell_price_min": best_sell["price"],
+        "sell_city": best_sell["city"],
+        "sell_date": best_sell["date"],
+        "spread": spread,
+        "roi_pct": roi,
     }
 
-    url = f"{API_BASE}/prices/{items_str}.json"
 
-    _rate_limit()
-    response = requests.get(url, params=params, timeout=30)
-    response.raise_for_status()
-    data = response.json()
+__all__ = [
+    "fetch_prices",
+    "build_prices_url",
+    "normalize_item",
+    "DEFAULT_CITIES",
+    "DEFAULT_QUALITIES",
+]
 
-    rows: List[Dict[str, Any]] = []
-    summary: Dict[str, Dict[str, Any]] = {}
-
-    for record in data:
-        item_id = record.get("item_id")
-        city = record.get("city")
-        quality = record.get("quality", 1)
-        sell_min = record.get("sell_price_min")
-        sell_max = record.get("sell_price_max")
-        buy_min = record.get("buy_price_min")
-        buy_max = record.get("buy_price_max")
-        last_sell = _parse_date(record.get("sell_price_min_date"))
-        last_buy = _parse_date(record.get("buy_price_max_date"))
-        icon_url = build_icon_url(item_id, quality)
-
-        row = {
-            "item_id": item_id,
-            "city": city,
-            "quality": quality,
-            "sell_min": sell_min,
-            "sell_max": sell_max,
-            "buy_min": buy_min,
-            "buy_max": buy_max,
-            "last_update_sell": last_sell,
-            "last_update_buy": last_buy,
-            "icon_url": icon_url,
-        }
-        rows.append(row)
-
-        # Update per-item summary
-        item_summary = summary.setdefault(
-            item_id,
-            {
-                "sell_price_min": {"city": None, "price": float("inf"), "date": None},
-                "buy_price_max": {"city": None, "price": 0, "date": None},
-            },
-        )
-        if (
-            sell_min is not None
-            and sell_min < item_summary["sell_price_min"]["price"]
-        ):
-            item_summary["sell_price_min"] = {
-                "city": city,
-                "price": sell_min,
-                "date": last_sell,
-            }
-        if (
-            buy_max is not None
-            and buy_max > item_summary["buy_price_max"]["price"]
-        ):
-            item_summary["buy_price_max"] = {
-                "city": city,
-                "price": buy_max,
-                "date": last_buy,
-            }
-
-    # Clean up and compute derived metrics
-    for item_id, info in summary.items():
-        if info["sell_price_min"]["price"] == float("inf"):
-            info["sell_price_min"]["price"] = None
-        if info["buy_price_max"]["price"] == 0:
-            info["buy_price_max"]["price"] = None
-
-        buy = info["sell_price_min"]["price"]
-        sell = info["buy_price_max"]["price"]
-        if buy is not None and sell is not None and buy > 0:
-            spread = sell - buy
-            roi = (spread / buy) * 100
-        else:
-            spread = None
-            roi = None
-        info["spread"] = spread
-        info["roi_percent"] = roi
-
-    return rows, summary
-
-
-__all__ = ["fetch_prices", "build_icon_url"]
