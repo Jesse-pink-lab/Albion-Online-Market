@@ -604,7 +604,7 @@ Notes:
             return
         
         # This would open a file dialog and export to CSV/Excel
-        self.set_status("Export feature coming soon!")
+        self.set_status("Export feature not yet implemented")
     
     def refresh_data(self):
         """Refresh data (called from main window)."""

@@ -363,7 +363,7 @@ class MainWindow(QMainWindow):
     def show_quick_search(self):
         """Show quick search dialog."""
         # This will be implemented later
-        self.show_info("Quick Search", "Quick search feature coming soon!")
+        self.show_info("Quick Search", "Quick search not yet implemented")
     
     def show_about(self):
         """Show about dialog."""

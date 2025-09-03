@@ -150,7 +150,11 @@ class MarketPricesWidget(QWidget):
             self.table.setItem(row_index, 4, QTableWidgetItem(str(row.get("sell_city"))))
             self.table.setItem(row_index, 5, QTableWidgetItem(str(row.get("spread"))))
             roi = row.get("roi_pct")
-            self.table.setItem(row_index, 6, QTableWidgetItem(f"{roi:.2f}" if roi is not None else ""))
+            self.table.setItem(
+                row_index,
+                6,
+                QTableWidgetItem(f"{roi:.1f}" if roi is not None else ""),
+            )
 
             dt = row.get("updated_dt")
             item = QTableWidgetItem("")

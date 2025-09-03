@@ -23,26 +23,24 @@ store = HealthStore()
 health_store = store
 
 
-def ping_aodp(server: str, session: requests.Session | None = None):
-    sess = session or get_shared_session()
+def ping_aodp(server: str):
+    sess = get_shared_session()
     base = base_for(server)
     url, params = build_prices_request(base, ["T4_BAG"], ["Lymhurst"], "1")
     try:
         r = sess.get(url, params=params, timeout=(3, 5))
-        if r.status_code == 429:
+        code = r.status_code
+        if code == 429 or code == 200:
+            _ = r.json() if code == 200 else None
             store._fails = 0
             store.set_online(True)
-            return
-        if r.status_code == 200:
-            _ = r.json()
-            store._fails = 0
-            store.set_online(True)
-            return
+            return True
         store._fails += 1
     except Exception:
         store._fails += 1
     if store._fails >= 3:
         store.set_online(False)
+    return store.aodp_online
 
 
 def mark_online_on_data_success():
