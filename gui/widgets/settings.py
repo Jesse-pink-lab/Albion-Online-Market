@@ -345,7 +345,7 @@ class SettingsWidget(QWidget):
             self.min_profit_spin.setValue(thresholds.get('min_profit', 1000))
             self.min_roi_spin.setValue(thresholds.get('min_roi_percent', 5.0))
 
-            self.fetch_all_check.setChecked(self.config.get('fetch_all_items', False))
+            self.fetch_all_check.setChecked(self.config.get('fetch_all_items', True))
             
             # App settings
             app_config = self.config.get('app', {})

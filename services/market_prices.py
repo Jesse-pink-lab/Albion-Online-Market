@@ -33,16 +33,23 @@ def fetch_prices(
 ):
     sess = session or get_shared_session()
     typed = parse_items(items_edit_text)
-    use_all = fetch_all if fetch_all is not None else bool(getattr(settings, "fetch_all_items", False))
-    catalog = list(items_catalog_codes())
+    use_all = (
+        fetch_all
+        if fetch_all is not None
+        else bool(getattr(settings, "fetch_all_items", True))
+    )
+    if (not typed) and not use_all:
+        log.info("No items to request (typed=%d, fetch_all=%s).", len(typed), use_all)
+        return []
+
+    catalog: list[str] = []
+    if (not typed) or use_all:
+        catalog = list(items_catalog_codes())
     items = catalog if (not typed and use_all) else typed
     log.info(
         "Item selection: catalog=%d typed=%d fetch_all=%s -> final=%d",
         len(catalog), len(typed), use_all, len(items),
     )
-    if not items:
-        log.info("No items to request (typed=%d, fetch_all=%s).", len(typed), use_all)
-        return []
 
     cities = cities_to_list(cities_sel, DEFAULT_CITIES)
     quals_csv = qualities_to_csv(qual_sel)

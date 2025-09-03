@@ -413,7 +413,7 @@ class FlipFinderWidget(QWidget):
         
         # Items
         cfg = self.main_window.get_config()
-        fetch_all = bool(cfg.get('fetch_all_items', False))
+        fetch_all = bool(cfg.get('fetch_all_items', True))
         raw = self.items_edit.text()
         typed = parse_items(raw)
         catalog = list(items_catalog_codes())
