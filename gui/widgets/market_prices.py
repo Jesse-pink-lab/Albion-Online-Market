@@ -166,8 +166,14 @@ class MarketPricesWidget(QWidget):
         cities = [i.text() for i in self.city_list.selectedItems()]
         qualities = [int(i.text()) for i in self.quality_list.selectedItems()]
         server = self.server_combo.currentText()
-        # Return all selected cities rather than collapsing to the first
-        return {"server": server, "cities": cities, "qualities": qualities}
+        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", False))
+        params = {
+            "server": server,
+            "cities": ",".join(cities) if isinstance(cities, list) else (cities or ""),
+            "qualities": ",".join(str(q) for q in qualities) if isinstance(qualities, list) else (qualities or ""),
+            "fetch_all": fetch_all,
+        }
+        return params
 
     def on_refresh_clicked(self) -> None:
         if self.refresh_running:
@@ -178,6 +184,13 @@ class MarketPricesWidget(QWidget):
         self.start_refresh()
 
     def start_refresh(self) -> None:
+        items_text = getattr(getattr(self, "itemsEdit", None), "text", lambda: "")().strip()
+        fetch_all = bool(self.main_window.get_config().get("fetch_all_items", False))
+        if not items_text and not fetch_all:
+            self.main_window.set_status(
+                "No items selected. Type IDs or enable 'Fetch all items' in Settings."
+            )
+            return
         self.refresh_running = True
         self.refresh_btn.setEnabled(False)
         self.main_window.set_refresh_enabled(False)

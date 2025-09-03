@@ -33,15 +33,17 @@ class RefreshWorker(QObject):
             from core.health import mark_online_on_data_success
 
             server = self.params.get("server")
-            cities = self.params.get("cities") or []
-            qualities = self.params.get("qualities") or []
+            cities_sel = self.params.get("cities", "")
+            qual_sel = self.params.get("qualities", "")
+            fetch_all = self.params.get("fetch_all", False)
             items_text = self.itemsEdit.text() if hasattr(self, "itemsEdit") else ""
 
             norm = fetch_prices(
                 server=server,
                 items_edit_text=items_text,
-                cities_sel=",".join(cities) if cities else "",
-                qual_sel=",".join(map(str, qualities)) if qualities else "",
+                cities_sel=cities_sel,
+                qual_sel=qual_sel,
+                fetch_all=fetch_all,
                 session=get_shared_session(),
                 settings=self.settings,
                 on_progress=lambda p, m: self.progress.emit(p, m),
