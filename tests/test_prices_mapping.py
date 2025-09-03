@@ -55,3 +55,34 @@ def test_spread_roi_and_dates():
     assert cell.text() == rel_age(dt)
     assert cell.toolTip() == fmt_tooltip(dt)
 
+
+def test_aggregate_prices_basic():
+    import pandas as pd
+    from services.market_prices import aggregate_prices
+
+    df = pd.DataFrame([
+        {
+            "item_id": "T4_SWORD",
+            "city": "Martlock",
+            "quality": 1,
+            "sell_price_min": 10000,
+            "buy_price_max": 9000,
+            "updated_dt": pd.Timestamp("2025-01-01"),
+        },
+        {
+            "item_id": "T4_SWORD",
+            "city": "Martlock",
+            "quality": 1,
+            "sell_price_min": 9900,
+            "buy_price_max": 9200,
+            "updated_dt": pd.Timestamp("2025-01-02"),
+        },
+    ])
+
+    out = aggregate_prices(df)
+    r = out.iloc[0]
+    assert r.sell_min == 9900
+    assert r.buy_max == 9200
+    assert r.spread == 700
+    assert 0.07 - 1e-6 <= r.roi <= 0.07 + 1e-6
+

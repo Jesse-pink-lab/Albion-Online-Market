@@ -9,6 +9,7 @@ from typing import List, Dict
 from urllib.parse import urlencode
 import requests
 from requests import HTTPError
+import pandas as pd
 
 from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request, DEFAULT_CITIES
@@ -21,8 +22,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_QUALITIES = "1,2,3,4,5"  # include 5 (Masterpiece)
 
-# Cache of the latest normalized rows
+# Cache of the latest normalized and aggregated rows
 LATEST_ROWS: list[dict] = []
+LATEST_RAW_DF: pd.DataFrame | None = None
+LATEST_AGG_DF: pd.DataFrame | None = None
 
 # Conservative safety margin; many proxies reject > ~2000 bytes.
 MAX_URL_LEN = 1800
@@ -214,49 +217,81 @@ def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
     return list(out.values())
 
 
-def top_opportunities(rows: list[dict], limit: int = 20) -> list[dict]:
-    """Compute top arbitrage opportunities from normalized rows."""
-    cands: list[dict] = []
-    for r in rows:
-        if (r.get("buy_price_max", 0) > 0) and (r.get("sell_price_min", 0) > 0) and r.get("spread", 0) > 0:
-            cands.append({
-                "item": r["item_id"],
-                "buy_city": r.get("buy_city") or r.get("city"),
-                "buy_price": r["buy_price_max"],
-                "sell_city": r.get("sell_city") or r.get("city"),
-                "sell_price": r["sell_price_min"],
-                "spread": r["spread"],
-                "roi_pct": r["roi_pct"],
-                "updated_dt": r["updated_dt"] or to_utc("1970-01-01T00:00:00Z"),
-            })
-    cands.sort(key=lambda x: (x["roi_pct"], x["spread"]), reverse=True)
-    return cands[:limit]
+AGG_COLS = {
+    "sell_price_min": "min",
+    "buy_price_max": "max",
+    "updated_dt": "max",
+}
 
 
-def emit_summary(norm_rows: list[dict]):
+def aggregate_prices(df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse raw rows to one per (item_id, city, quality)."""
+    if df.empty:
+        return df
+    grp = (
+        df.groupby(["item_id", "city", "quality"], as_index=False)
+        .agg(AGG_COLS)
+        .rename(columns={"sell_price_min": "sell_min", "buy_price_max": "buy_max"})
+    )
+    grp["spread"] = (grp["sell_min"] - grp["buy_max"]).clip(lower=0)
+    grp["roi"] = (
+        (grp["sell_min"] - grp["buy_max"]) / grp["buy_max"]
+    ).replace([pd.NA, pd.NaT], 0).fillna(0)
+    return grp
+
+
+def top_opportunities(df: pd.DataFrame, limit: int = 20) -> list[dict]:
+    """Compute top arbitrage opportunities from aggregated rows."""
+    if df.empty:
+        return []
+    cands = df[(df["buy_max"] > 0) & (df["sell_min"] > 0) & (df["spread"] > 0)]
+    cands = cands.sort_values(["roi", "spread"], ascending=[False, False]).head(limit)
+    out = []
+    for r in cands.itertuples(index=False):
+        out.append(
+            {
+                "item": r.item_id,
+                "buy_city": r.city,
+                "sell_city": r.city,
+                "buy_price": int(r.buy_max),
+                "sell_price": int(r.sell_min),
+                "spread": int(r.spread),
+                "roi_pct": float(r.roi * 100),
+                "updated_dt": r.updated_dt,
+            }
+        )
+    return out
+
+
+def emit_summary(df: pd.DataFrame):
     summary = {
         "last_update_utc": now_utc_iso(),
-        "records": len(norm_rows),
-        "top_opportunities": top_opportunities(norm_rows, 20),
+        "records": int(len(df)),
+        "top_opportunities": top_opportunities(df, 20),
     }
     signals.market_data_ready.emit(summary)
 
 
 def on_fetch_completed(norm_rows: list[dict]):
     """Cache and emit latest normalized rows."""
-    global LATEST_ROWS
-    LATEST_ROWS = norm_rows or []
+    global LATEST_ROWS, LATEST_RAW_DF, LATEST_AGG_DF
+    LATEST_RAW_DF = pd.DataFrame(norm_rows or [])
+    LATEST_AGG_DF = aggregate_prices(LATEST_RAW_DF)
+    LATEST_ROWS = LATEST_AGG_DF.to_dict("records")
     signals.market_rows_updated.emit(LATEST_ROWS)
-    emit_summary(LATEST_ROWS)
+    emit_summary(LATEST_AGG_DF)
 
 
 __all__ = [
     "fetch_prices",
     "normalize_and_dedupe",
+    "aggregate_prices",
     "DEFAULT_CITIES",
     "DEFAULT_QUALITIES",
     "top_opportunities",
     "emit_summary",
     "on_fetch_completed",
     "LATEST_ROWS",
+    "LATEST_RAW_DF",
+    "LATEST_AGG_DF",
 ]
