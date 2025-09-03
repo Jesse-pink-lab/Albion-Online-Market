@@ -6,12 +6,34 @@ Handles fetching market price data from the AODP API with rate limiting and erro
 
 import logging
 import time
-import requests
-from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
+
 import json
+import requests
 from core.health import update_aodp_status
+
+# ---------------------------------------------------------------------------
+# Server resolution and shared session
+# ---------------------------------------------------------------------------
+
+SERVER_BASE = {
+    "west": "https://west.albion-online-data.com",
+    "east": "https://east.albion-online-data.com",
+    "europe": "https://europe.albion-online-data.com",
+}
+
+# Shared session used by higher level services.  Tests rely on predictable
+# timeout behaviour so we keep it here as a central definition.
+SESSION = requests.Session()
+SESSION.headers.update(
+    {
+        "User-Agent": "AlbionTradeOptimizer/1.0",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip, deflate",
+    }
+)
 
 
 class AODPAPIError(Exception):

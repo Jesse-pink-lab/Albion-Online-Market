@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from utils.timefmt import to_utc, rel_age, fmt_tooltip
-from utils.items import parse_items_input
+from utils.items import parse_items
 from PySide6.QtGui import QFont, QColor
 
 from engine.flips import FlipCalculator, FlipOpportunity
@@ -45,10 +45,6 @@ class FlipSearchThread(QThread):
             items = self.search_params.get('items', [])
             cities = self.search_params.get('cities', [])
             qualities = self.search_params.get('qualities', [1])
-            
-            if not items:
-                # Use default items if none specified
-                items = ['T4_BAG', 'T5_BAG', 'T4_SWORD', 'T5_SWORD', 'T4_BOW', 'T5_BOW']
             
             prices = self.api_client.get_current_prices(items, cities, qualities)
             
@@ -418,16 +414,7 @@ class FlipFinderWidget(QWidget):
         # Items
         cfg = self.main_window.get_config()
         raw = self.items_edit.text()
-        all_items = None
-        if cfg.get('fetch_all_items'):
-            try:
-                from recipes.loader import RecipeLoader
-                loader = RecipeLoader()
-                loader.load_recipes()
-                all_items = list(loader.recipes.keys())
-            except Exception:
-                all_items = []
-        items = parse_items_input(raw, cfg.get('fetch_all_items', False), all_items)
+        items = parse_items(raw, cfg.get('fetch_all_items', False))
         if items:
             params['items'] = items
         

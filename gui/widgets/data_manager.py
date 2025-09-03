@@ -33,6 +33,7 @@ class DataManagerWidget(QWidget):
         # Data status
         self.last_update = None
         self.data_stats = {}
+        self.api_online = False
         
         self.init_ui()
         self.init_timer()
@@ -307,6 +308,7 @@ class DataManagerWidget(QWidget):
             self.logger.error(f"Failed to update status: {e}")
 
     def on_health_changed(self, store) -> None:
+        self.api_online = store.aodp_online
         if store.aodp_online:
             self.api_status_card.value_label.setText("🟢 Online")
             if store.last_checked:
@@ -314,6 +316,7 @@ class DataManagerWidget(QWidget):
         else:
             self.api_status_card.value_label.setText("🔴 Offline")
             self.api_status_card.subtitle_label.setText("Connection Error")
+        self.update_sources_table()
     
     def update_sources_table(self):
         """Update data sources table."""
@@ -321,7 +324,7 @@ class DataManagerWidget(QWidget):
             sources = [
                 {
                     'name': 'AODP API',
-                    'status': '🟢 Active' if self.main_window.get_api_client() else '🔴 Inactive',
+                    'status': '🟢 Online' if self.api_online else '🔴 Offline',
                     'last_update': self.last_update.strftime('%H:%M:%S') if self.last_update else 'Never',
                     'records': 'Real-time'
                 },
