@@ -16,7 +16,8 @@ from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request, DEFAULT_CITIES
 from utils.params import qualities_to_csv, cities_to_list
 from utils.items import parse_items, items_catalog_codes
-from utils.timefmt import to_utc, now_utc_iso
+from utils.timefmt import to_utc, now_utc_iso, rel_age
+from utils.constants import MAX_DATA_AGE_HOURS
 from core.signals import signals
 from services.netlimit import bucket
 from services.http_cache import get_cached, put_cached
@@ -262,43 +263,82 @@ def fetch_prices(
 
 
 def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
+    """Normalize raw API rows into one record per (item_id, city, quality).
+
+    The returned dictionaries contain all values required by the UI so that no
+    additional calculations are needed later.  Older records beyond
+    ``MAX_DATA_AGE_HOURS`` are discarded.
+    """
+
+    cutoff = None
+    if MAX_DATA_AGE_HOURS and MAX_DATA_AGE_HOURS > 0:
+        from datetime import datetime, timezone, timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_DATA_AGE_HOURS)
+
     out: Dict[tuple, Dict] = {}
     for row in rows:
-        item = row.get("item_id")
+        item_id = (row.get("item_id") or "").strip().upper()
         city = row.get("city")
         quality = int(row.get("quality") or 1)
-        key = (item, city, quality)
+        key = (item_id, city, quality)
 
         buy = int(row.get("buy_price_max") or 0)
         sell = int(row.get("sell_price_min") or 0)
-        spread = max(sell - buy, 0)
-        roi = (spread / buy * 100.0) if buy > 0 else 0.0
 
         def ts(d):
-            try: return to_utc(d)
-            except: return None
+            try:
+                return to_utc(d)
+            except Exception:  # pragma: no cover - defensive
+                return None
+
         sell_dt = ts(row.get("sell_price_min_date"))
-        buy_dt  = ts(row.get("buy_price_max_date"))
-        best_dt = sell_dt or buy_dt
+        buy_dt = ts(row.get("buy_price_max_date"))
+        updated_dt = max(
+            [d for d in (sell_dt, buy_dt) if d is not None],
+            default=None,
+        )
+        if cutoff and (updated_dt is None or updated_dt < cutoff):
+            continue
 
         prev = out.get(key)
-        keep = (prev is None)
-        if prev and best_dt:
-            keep = best_dt > prev["updated_dt"]
-        if keep:
+        if prev is None:
             out[key] = {
-                "item_id": item,
+                "item_id": item_id,
+                "item_name": row.get("item_name") or item_id,
                 "city": city,
                 "quality": quality,
                 "buy_price_max": buy,
-                "sell_price_min": sell,
+                "sell_price_min": sell if sell > 0 else 0,
+                "updated_dt": updated_dt,
+            }
+        else:
+            prev["buy_price_max"] = max(prev["buy_price_max"], buy)
+            if sell > 0:
+                prev_sell = prev.get("sell_price_min") or 0
+                prev["sell_price_min"] = min(prev_sell or sell, sell) if prev_sell else sell
+            if updated_dt and (prev.get("updated_dt") is None or updated_dt > prev["updated_dt"]):
+                prev["updated_dt"] = updated_dt
+
+    normalized: List[Dict] = []
+    for rec in out.values():
+        buy = int(rec.get("buy_price_max") or 0)
+        sell = int(rec.get("sell_price_min") or 0)
+        spread = sell - buy
+        if spread < 0:
+            spread = 0
+        roi = 100.0 * spread / max(1, buy)
+        udt = rec.get("updated_dt")
+        rec.update(
+            {
                 "spread": spread,
                 "roi_pct": roi,
-                "buy_city": city if buy else None,
-                "sell_city": city if sell else None,
-                "updated_dt": best_dt,
+                "updated_human": rel_age(udt) if udt else "",
             }
-    return list(out.values())
+        )
+        normalized.append(rec)
+
+    return normalized
 
 
 AGG_COLS = {
@@ -325,11 +365,16 @@ def aggregate_prices(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def top_opportunities(df: pd.DataFrame, limit: int = 20) -> list[dict]:
-    """Compute top arbitrage opportunities from aggregated rows."""
+    """Compute top opportunities from normalized rows.
+
+    This is a simple ranking of rows by ROI and spread; it does not attempt to
+    cross-reference cities.  The structure of the returned dictionaries matches
+    the historical API used by the dashboard widget.
+    """
     if df.empty:
         return []
-    cands = df[(df["buy_max"] > 0) & (df["sell_min"] > 0) & (df["spread"] > 0)]
-    cands = cands.sort_values(["roi", "spread"], ascending=[False, False]).head(limit)
+    cands = df[(df["buy_price_max"] > 0) & (df["sell_price_min"] > 0) & (df["spread"] > 0)]
+    cands = cands.sort_values(["roi_pct", "spread"], ascending=[False, False]).head(limit)
     out = []
     for r in cands.itertuples(index=False):
         out.append(
@@ -337,10 +382,10 @@ def top_opportunities(df: pd.DataFrame, limit: int = 20) -> list[dict]:
                 "item": r.item_id,
                 "buy_city": r.city,
                 "sell_city": r.city,
-                "buy_price": int(r.buy_max),
-                "sell_price": int(r.sell_min),
+                "buy_price": int(r.buy_price_max),
+                "sell_price": int(r.sell_price_min),
                 "spread": int(r.spread),
-                "roi_pct": float(r.roi * 100),
+                "roi_pct": float(r.roi_pct),
                 "updated_dt": r.updated_dt,
             }
         )
@@ -360,8 +405,8 @@ def on_fetch_completed(norm_rows: list[dict]):
     """Cache and emit latest normalized rows."""
     global LATEST_ROWS, LATEST_RAW_DF, LATEST_AGG_DF
     LATEST_RAW_DF = pd.DataFrame(norm_rows or [])
-    LATEST_AGG_DF = aggregate_prices(LATEST_RAW_DF)
-    LATEST_ROWS = LATEST_AGG_DF.to_dict("records")
+    LATEST_AGG_DF = LATEST_RAW_DF  # already aggregated by normalization
+    LATEST_ROWS = norm_rows
     signals.market_rows_updated.emit(LATEST_ROWS)
     emit_summary(LATEST_AGG_DF)
 
