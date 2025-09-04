@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Set, Optional
 
 from utils.catalog_provider import read_master_catalog
 
@@ -44,6 +44,18 @@ def parse_items(raw: str | None) -> List[str]:
     raw = (raw or "").strip()
     return [t.strip().upper() for t in raw.split(",") if t.strip()]
 
+
+def parse_item_input(raw: str | None) -> Optional[Set[str]]:
+    """Return a set of item identifiers or ``None`` for "all".
+
+    ``raw`` is a comma separated list of item codes.  Items are upper-cased
+    and deduplicated.  Empty inputs result in ``None`` which the callers use
+    to represent "all items".
+    """
+
+    parts = {t.strip().upper() for t in (raw or "").split(",") if t.strip()}
+    return parts or None
+
 def items_catalog_codes() -> List[str]:
     """Return the filtered master list of Albion item IDs.
 
@@ -53,4 +65,9 @@ def items_catalog_codes() -> List[str]:
 
     return list(read_master_catalog())
 
-__all__ = ["parse_items", "load_catalog", "items_catalog_codes"]
+__all__ = [
+    "parse_items",
+    "parse_item_input",
+    "load_catalog",
+    "items_catalog_codes",
+]
