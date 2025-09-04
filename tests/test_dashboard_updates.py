@@ -58,7 +58,7 @@ def test_dashboard_updates():
             pass
 
     mpw = MarketPricesWidget(DummyMain())
-    mpw.on_refresh_done({"elapsed": 0, "result": {"items": 0, "records": 0}})
+    mpw.on_refresh_done({"elapsed": 0, "result": {"unique_items": 0, "records": 0}})
     app.processEvents()
 
     assert len(updates) == 1

@@ -67,6 +67,18 @@ def test_get_shared_session_thread_local():
     assert other and other[0] is not main_sess
 
 
+def test_aodp_client_uses_shared_session():
+    sess = get_shared_session()
+    client = aodp_mod.AODPClient({})
+    assert client.session is get_shared_session()
+
+
+def test_shared_session_headers():
+    sess = get_shared_session()
+    assert sess.headers.get("Accept") == "application/json"
+    assert "AlbionTradeOptimizer" in sess.headers.get("User-Agent", "")
+
+
 def test_latest_rows_returns_copy():
     STORE.clear()
     STORE._latest_rows = [{"a": 1}]

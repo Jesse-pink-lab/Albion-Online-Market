@@ -243,7 +243,7 @@ class MarketPricesWidget(QWidget):
         self.main_window.set_status(f"Refresh done in {elapsed:.2f}s")
         self.logger.info(
             "Market refresh completed: items=%s records=%s elapsed=%.2fs",
-            payload.get("result", {}).get("items"),
+            payload.get("result", {}).get("unique_items"),
             payload.get("result", {}).get("records"),
             elapsed,
         )

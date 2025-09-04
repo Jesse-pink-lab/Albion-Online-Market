@@ -10,7 +10,7 @@ from typing import List, Dict
 from urllib.parse import urlencode
 import json
 import requests
-from requests import HTTPError
+from requests import exceptions as rqexc
 import pandas as pd
 
 from datasources.http import get_shared_session
@@ -21,7 +21,7 @@ from utils.timefmt import to_utc, now_utc_iso, rel_age
 from utils.constants import MAX_DATA_AGE_HOURS
 from core.signals import signals
 from services.netlimit import bucket
-from services.http_cache import get_cached, put_cached
+from services.http_cache import cache_get, cache_set
 
 log = logging.getLogger(__name__)
 
@@ -96,12 +96,6 @@ class MarketPriceStore:
         quals_list = [int(q) for q in quals_csv.split(",") if q]
         base = base_for(server)
 
-        cache_ttl = int(
-            getattr(settings, "cache_ttl_sec", None)
-            or (settings.get("cache_ttl_sec") if isinstance(settings, dict) else None)
-            or 120
-        )
-
         max_conf = int(
             getattr(settings, "max_concurrency", None)
             or (settings.get("max_concurrency") if isinstance(settings, dict) else None)
@@ -133,19 +127,23 @@ class MarketPriceStore:
                 base, len(chunk), len(cities), quals_csv, attempt,
             )
             log.debug("AODP URL: %s params=%s", url, params)
-            cached = get_cached(full_url)
-            if cached:
-                body, status, headers = cached
+            cached = cache_get(full_url)
+            if cached is not None:
+                body = cached
+                status = 200
                 r = None
             else:
                 bucket.acquire()
-                r = sess.get(url, params=params, timeout=(5, 10))
+                try:
+                    r = sess.get(url, params=params, timeout=(5, 10))
+                except (rqexc.Timeout, rqexc.ConnectionError) as e:
+                    log.warning("Network error on %s: %s", full_url, e)
+                    return []
                 status = r.status_code
                 self._on_result(status)
                 body = getattr(r, "content", b"")
-                headers = getattr(r, "headers", {})
                 if status == 200 and body:
-                    put_cached(full_url, body, status, headers, ttl=cache_ttl)
+                    cache_set(full_url, body)
             if status == 414:
                 if len(chunk) == 1:
                     log.warning("414 on single item; skipping id=%s", chunk[0])
@@ -158,7 +156,7 @@ class MarketPriceStore:
                 time.sleep(0.5 * (2 ** (attempt - 1)))
                 return pull(chunk, attempt + 1)
             if status != 200:
-                raise HTTPError(f"Unexpected status {status}")
+                raise rqexc.HTTPError(f"Unexpected status {status}")
             try:
                 if body:
                     data = json.loads(body.decode("utf-8"))
@@ -166,39 +164,56 @@ class MarketPriceStore:
                     data = r.json() or []
                 else:
                     data = []
-            except Exception:
-                data = []
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                log.warning("Bad response on %s: %s", full_url, e)
+                return []
             log.info("AODP RESP: status=%s records=%d", status, len(data))
             return data
 
         failed = 0
         failed_chunks: list[list[str]] = []
+        futs = []
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_to_chunk = {ex.submit(pull, c): c for c in chunks}
-            total = len(future_to_chunk)
-            for idx, fut in enumerate(as_completed(future_to_chunk), 1):
-                if cancel():
+            submitted_chunks: list[list[str]] = []
+            for chunk in chunks:
+                if cancel and cancel():
+                    break
+                fut = ex.submit(pull, chunk)
+                futs.append(fut)
+                submitted_chunks.append(chunk)
+            future_to_chunk = dict(zip(futs, submitted_chunks))
+            total = len(futs)
+            aborted = False
+            for idx, fut in enumerate(as_completed(futs), 1):
+                if cancel and cancel():
+                    aborted = True
                     break
                 chunk = future_to_chunk[fut]
                 try:
                     results.extend(fut.result())
-                except HTTPError as e:
+                except rqexc.HTTPError as e:
                     if getattr(e.response, "status_code", None) == 429:
                         failed_chunks.append(chunk)
                     failed += 1
                     log.error("Chunk failed (%d/%d): %r", idx, total, e)
-                except Exception as e:
+                except (rqexc.RequestException, json.JSONDecodeError, ValueError) as e:
                     failed += 1
                     log.error("Chunk failed (%d/%d): %r", idx, total, e)
-                if on_progress:
+                if on_progress and total:
                     on_progress(int(idx / total * 100), f"Fetched {idx}/{total} chunks")
+            if aborted:
+                for f in futs:
+                    if not f.done():
+                        f.cancel()
+                ex.shutdown(wait=False, cancel_futures=True)
+                return []
         if failed_chunks:
             log.info("Retry tail for %d 429-chunks at low rate", len(failed_chunks))
             for c in failed_chunks:
                 try:
                     data = pull(c, attempt=1)
                     results.extend(data or [])
-                except Exception as e:
+                except rqexc.RequestException as e:
                     log.warning("Tail retry failed: %r", e)
                 time.sleep(0.4)
         if failed:
@@ -252,9 +267,11 @@ def chunk_by_url(
     base: str,
     cities: list[str],
     qualities: list[int],
-    max_url: int = 1900,
+    max_url: int | None = None,
 ):
     """Yield chunks of items whose request URL stays under ``max_url`` characters."""
+    if max_url is None:
+        max_url = MAX_URL_LEN
     cur: list[str] = []
     for it in items:
         test = ",".join(cur + [it])
