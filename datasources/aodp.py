@@ -13,7 +13,7 @@ import json
 import requests
 from datasources.aodp_url import base_for, build_prices_request
 from services.netlimit import bucket
-from services.market_prices import _on_result
+from datasources.http import get_shared_session
 
 
 class AODPAPIError(Exception):
@@ -23,12 +23,12 @@ class AODPAPIError(Exception):
 
 class AODPClient:
     """Client for the Albion Online Data Project API."""
-    
-    def __init__(self, config: Dict[str, Any]):
+
+    def __init__(self, config: Dict[str, Any], session=None):
         """Initialize AODP client with configuration."""
         self.config = config
         self.logger = logging.getLogger(__name__)
-        
+
         # API configuration
         aodp_config = config.get('aodp', {})
         # Default to Europe server unless specified
@@ -37,19 +37,14 @@ class AODPClient:
         self.chunk_size = aodp_config.get('chunk_size', 40)
         self.rate_delay = aodp_config.get('rate_delay_seconds', 1)
         self.timeout = aodp_config.get('timeout_seconds', 30)
-        
+
         # Rate limiting
         self.last_request_time = 0
         self.request_count = 0
         self.rate_limit_window_start = time.time()
-        
+
         # Session for connection pooling
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'AlbionTradeOptimizer/1.0.0',
-            'Accept': 'application/json',
-            'Accept-Encoding': 'gzip, deflate'
-        })
+        self.session = session or get_shared_session()
     
     def _enforce_rate_limit(self):
         """Enforce API rate limits."""
@@ -84,7 +79,6 @@ class AODPClient:
             self.logger.debug(f"Making request to {url} with params {params}")
             bucket.acquire()
             response = self.session.get(url, params=params, timeout=self.timeout)
-            _on_result(response.status_code)
             response.raise_for_status()
             data = response.json()
             self.logger.debug(
@@ -98,8 +92,13 @@ class AODPClient:
             self.logger.error(f"Failed to parse JSON response: {e}")
             raise AODPAPIError(f"Invalid JSON response: {e}")
     
-    def get_current_prices(self, item_ids: List[str], locations: Optional[List[str]] = None,
-                          qualities: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    def get_current_prices(
+        self,
+        item_ids: List[str],
+        locations: Optional[List[str]] = None,
+        qualities: Optional[List[int]] = None,
+        on_chunk=None,
+    ) -> List[Dict[str, Any]]:
         """
         Get current market prices for items.
         
@@ -129,8 +128,10 @@ class AODPClient:
             
             try:
                 chunk_prices = self._get_prices_chunk(chunk_items, locations, qualities)
+                if on_chunk:
+                    on_chunk(chunk_prices)
                 all_prices.extend(chunk_prices)
-                
+
             except AODPAPIError as e:
                 self.logger.error(f"Failed to get prices for chunk {chunk_items}: {e}")
                 # Continue with other chunks
@@ -348,19 +349,5 @@ def refresh_prices(server: str, cities: list[str], qualities, items_text: str = 
     behaviour.
     """
 
-    from services.market_prices import fetch_prices
-    from datasources.http import get_shared_session
-
-    norm = fetch_prices(
-        server=server,
-        items_edit_text=items_text,
-        cities_sel=",".join(cities) if cities else "",
-        qual_sel=",".join(map(str, qualities)) if qualities else "",
-        fetch_all=getattr(settings, "fetch_all_items", True),
-        session=get_shared_session(),
-        settings=settings,
-        on_progress=on_progress,
-        cancel=should_cancel,
-    )
-    return {"items": len(norm), "records": len(norm)}
+    raise NotImplementedError("refresh_prices is deprecated; use services.market_prices.fetch_prices")
 

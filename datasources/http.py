@@ -18,7 +18,12 @@ def _new_session() -> requests.Session:
     adapter = HTTPAdapter(pool_connections=20, pool_maxsize=50, max_retries=retry)
     s.mount("http://", adapter)
     s.mount("https://", adapter)
-    s.headers.update({"User-Agent": "AlbionTradeOptimizer/1.0"})
+    s.headers.update({
+        "User-Agent": "AlbionTradeOptimizer/1.0 (+https://github.com/<repo>; contact: you@example.com)",
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+    })
     return s
 
 def get_shared_session() -> requests.Session:

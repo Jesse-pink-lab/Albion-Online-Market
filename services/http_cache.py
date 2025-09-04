@@ -1,14 +1,36 @@
-import time
-from typing import Optional, Tuple, Dict
+from collections import OrderedDict
+import threading
+from typing import Optional
 
-_cache: Dict[str, Tuple[float, bytes, int, dict]] = {}
+HTTP_CACHE_CAPACITY = 256
 
-def get_cached(url: str) -> Optional[Tuple[bytes, int, dict]]:
-    now = time.time()
-    hit = _cache.get(url)
-    if hit and hit[0] > now:
-        return hit[1], hit[2], hit[3]
-    return None
+class _LRU:
+    def __init__(self, capacity: int):
+        self._cap = max(1, capacity)
+        self._lock = threading.RLock()
+        self._map: OrderedDict[str, bytes] = OrderedDict()
 
-def put_cached(url: str, body: bytes, status: int, headers: dict, ttl: int = 120) -> None:
-    _cache[url] = (time.time() + ttl, body, status, headers)
+    def get(self, key: str) -> Optional[bytes]:
+        with self._lock:
+            val = self._map.get(key)
+            if val is None:
+                return None
+            self._map.move_to_end(key, last=True)
+            return val
+
+    def set(self, key: str, value: bytes) -> None:
+        with self._lock:
+            if key in self._map:
+                self._map.move_to_end(key, last=True)
+            self._map[key] = value
+            while len(self._map) > self._cap:
+                self._map.popitem(last=False)
+
+_cache = _LRU(HTTP_CACHE_CAPACITY)
+
+def cache_get(key: str) -> Optional[bytes]:
+    return _cache.get(key)
+
+
+def cache_set(key: str, value: bytes) -> None:
+    _cache.set(key, value)

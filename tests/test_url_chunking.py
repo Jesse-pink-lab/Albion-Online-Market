@@ -3,7 +3,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import types
 
-from services.market_prices import _chunk_by_len_and_count, _estimate_url_len, fetch_prices
+from services.market_prices import _chunk_by_len_and_count, _estimate_url_len, fetch_prices, chunk_by_url, MAX_URL_LEN
 
 class DummyResp:
     def __init__(self, status, data=None):
@@ -23,6 +23,20 @@ def test_chunk_by_len_and_count_respects_url():
     items = ["X" * 500, "Y" * 500]
     chunks = _chunk_by_len_and_count(items, base, cities_csv, quals_csv, 10, max_url=1000)
     assert all(_estimate_url_len(base, c, cities_csv, quals_csv) <= 1000 for c in chunks)
+
+
+def test_chunk_by_url_uses_constant():
+    base = "https://example.com"
+    cities = ["Caerleon"]
+    quals = [1]
+    items = [f"ITEM{i}" for i in range(100)]
+    chunks = list(chunk_by_url(items, base, cities, quals))
+    cities_csv = ",".join(cities)
+    quals_csv = ",".join(map(str, quals))
+    assert all(
+        _estimate_url_len(base, c, cities_csv, quals_csv) <= MAX_URL_LEN
+        for c in chunks
+    )
 
 
 def test_auto_split_on_414(monkeypatch):

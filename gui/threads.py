@@ -52,11 +52,15 @@ class RefreshWorker(QObject):
             if norm:
                 mark_online_on_data_success()
             elapsed = time.perf_counter() - start
+            records = len(norm)
+            unique_items = len({r.get("item_id") for r in norm if "item_id" in r})
             log.info(
-                "Market refresh completed: items=%s records=%s elapsed=%.2fs",
-                len(norm), len(norm), elapsed,
+                "Market refresh completed: items=%d records=%d elapsed=%.2fs",
+                unique_items,
+                records,
+                elapsed,
             )
-            summary = {"items": len(norm), "records": len(norm)}
+            summary = {"records": records, "unique_items": unique_items}
             self.finished.emit({"ok": True, "elapsed": elapsed, "result": summary})
         except Exception as e:  # pragma: no cover - unexpected errors
             log.exception("RefreshWorker failed: %s", e)
