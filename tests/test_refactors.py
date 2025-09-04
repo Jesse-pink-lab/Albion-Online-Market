@@ -3,6 +3,8 @@ import threading
 import time
 import pytest
 from requests import exceptions as rqexc
+import time
+import threading
 
 from services.netlimit import TokenBucket
 from core import health
@@ -28,6 +30,17 @@ def test_token_bucket_no_deadlock():
     end = time.time()
     assert len(times) == 2
     assert end - start < 1.8
+
+
+def test_token_bucket_timeout_and_cancel():
+    bucket = TokenBucket(rate_per_sec=0, capacity=1)
+    bucket.acquire()
+    start = time.time()
+    assert bucket.acquire(timeout=0.1) is False
+    assert time.time() - start < 0.3
+    ev = threading.Event()
+    ev.set()
+    assert bucket.acquire(cancel_event=ev) is False
 
 
 def test_ping_aodp_timeout_logs(monkeypatch, caplog):

@@ -221,7 +221,11 @@ class SettingsWidget(QWidget):
 
         dest = managed_client_path()
         try:
-            fetch_latest_windows_client(dest, prefer_installer=False)
+            data = fetch_latest_windows_client()
+            if not data:
+                raise RuntimeError("Download failed")
+            Path(dest).parent.mkdir(parents=True, exist_ok=True)
+            Path(dest).write_bytes(data)
             self.albion_client_path_edit.setText(dest)
             self.update_albion_client_status()
             QMessageBox.information(self, "Download", "Download complete")
