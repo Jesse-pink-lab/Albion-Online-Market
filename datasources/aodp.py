@@ -205,8 +205,14 @@ class AODPClient:
                 'observed_at_utc': observed_at_utc
             }
             
-        except Exception as e:
-            self.logger.warning(f"Failed to process price record: {e}")
+        except KeyError as e:
+            self.logger.warning(f"KeyError processing price record: {e}")
+            return None
+        except TypeError as e:
+            self.logger.warning(f"TypeError processing price record: {e}")
+            return None
+        except ValueError as e:
+            self.logger.warning(f"ValueError processing price record: {e}")
             return None
     
     def get_historical_prices(self, item_ids: List[str], locations: Optional[List[str]] = None,
