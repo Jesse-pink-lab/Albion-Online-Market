@@ -12,7 +12,7 @@ FlipFinderWidget = flip_finder.FlipFinderWidget
 
 def test_detail_panel_uses_item_name(monkeypatch):
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr(flip_finder.ICON_PROVIDER, "get_icon_async", lambda *a, **k: None)
+    monkeypatch.setattr(flip_finder, "fetch_icon_bytes", lambda *a, **k: None)
     widget = FlipFinderWidget(None)
     flip = {
         "item_id": "T4_SWORD",

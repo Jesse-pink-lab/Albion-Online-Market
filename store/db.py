@@ -5,15 +5,17 @@ Handles database initialization, connections, and data access operations.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import create_engine, and_, or_, desc, func
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import and_, create_engine, desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base, Price, Scan, Flip, CraftPlan, ActivityScore, AppSettings
+from .models import ActivityScore, AppSettings, Base, CraftPlan, Flip, Price, Scan
 from utils.paths import DB_PATH
+
+log = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -38,25 +40,25 @@ class DatabaseManager:
         """Initialize database engine and create tables."""
         try:
             self.logger.info(f"Initializing database at {self.db_path}")
-            
+
             # Create engine
             self.engine = create_engine(
                 self.db_url,
                 echo=False,  # Set to True for SQL debugging
                 pool_pre_ping=True,
-                connect_args={"check_same_thread": False}  # For SQLite
+                connect_args={"check_same_thread": False},  # For SQLite
             )
-            
+
             # Create session factory
             self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
-            
+
             # Create all tables
             Base.metadata.create_all(bind=self.engine)
-            
+
             self.logger.info("Database initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize database: {e}")
+
+        except SQLAlchemyError as e:
+            log.exception("Database initialization failed: %s", e)
             raise
     
     def get_session(self) -> Session:

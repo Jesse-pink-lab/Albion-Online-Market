@@ -15,9 +15,9 @@ from PySide6.QtWidgets import (
     QProgressBar, QFrame, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon, QPixmap
 
-from services.icons import ICON_PROVIDER
+from services.item_icons import fetch_icon_bytes
 from utils.timefmt import rel_age
 from utils.items import parse_item_input
 from utils.params import parse_quality_input, parse_city_selection
@@ -484,7 +484,12 @@ class FlipFinderWidget(QWidget):
             def _apply_icon(icon, cell=item_cell):
                 cell.setIcon(icon)
 
-            ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
+            data = fetch_icon_bytes(item_id, quality or 1)
+            if data:
+                pm = QPixmap()
+                pm.loadFromData(data)
+                if not pm.isNull():
+                    _apply_icon(QIcon(pm))
 
             route_str = f"{flip['buy_city']} → {flip['sell_city']}"
             flip.setdefault("route", route_str)
