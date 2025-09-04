@@ -14,6 +14,7 @@ sys.path.insert(0, str(project_root))
 
 from engine.config import ConfigManager
 from store.db import DatabaseManager
+from utils.paths import init_app_paths
 
 
 def test_database():
@@ -24,7 +25,8 @@ def test_database():
     config_manager = ConfigManager()
     config = config_manager.load_config()
     print(f"✓ Configuration loaded")
-    
+
+    init_app_paths()
     # Initialize database
     db_manager = DatabaseManager(config)
     db_manager.initialize_database()

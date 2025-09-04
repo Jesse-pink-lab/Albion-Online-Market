@@ -28,7 +28,7 @@ class RefreshWorker(QObject):
         start = time.perf_counter()
         self.progress.emit(1, "Starting market refresh...")
         try:
-            from services.market_prices import fetch_prices
+            from services.market_prices import STORE
             from datasources.http import get_shared_session
             from core.health import mark_online_on_data_success
 
@@ -38,7 +38,7 @@ class RefreshWorker(QObject):
             fetch_all = self.params.get("fetch_all", True)
             items_text = self.itemsEdit.text() if hasattr(self, "itemsEdit") else ""
 
-            norm = fetch_prices(
+            norm = STORE.fetch_prices(
                 server=server,
                 items_edit_text=items_text,
                 cities_sel=cities_sel,

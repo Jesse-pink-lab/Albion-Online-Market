@@ -7,27 +7,13 @@ Handles fetching market price data from the AODP API with rate limiting and erro
 import logging
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import json
 import requests
 from datasources.aodp_url import base_for, build_prices_request
 from services.netlimit import bucket
 from services.market_prices import _on_result
-
-# ---------------------------------------------------------------------------
-# Shared session used by higher level services.  Tests rely on predictable
-# timeout behaviour so we keep it here as a central definition.
-# ---------------------------------------------------------------------------
-
-SESSION = requests.Session()
-SESSION.headers.update(
-    {
-        "User-Agent": "AlbionTradeOptimizer/1.0",
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip, deflate",
-    }
-)
 
 
 class AODPAPIError(Exception):
@@ -305,25 +291,14 @@ class AODPClient:
     def _process_history_record(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Process a single historical price record."""
         try:
-            # Extract data from API response
-            item_id = record.get('item_type_id')
-            location = record.get('location')
-            quality = record.get('quality', 1)
-            
-            # Price data (historical data typically has avg_price)
-            avg_price = record.get('avg_price')
-            item_count = record.get('item_count', 0)
-            
-            # Timestamp
-            timestamp_str = record.get('timestamp')
-            if timestamp_str:
-                try:
-                    observed_at_utc = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                except ValueError:
-                    observed_at_utc = datetime.utcnow()
-            else:
-                observed_at_utc = datetime.utcnow()
-            
+            item_id = record['item_type_id']
+            location = record['location']
+            quality = int(record.get('quality', 1))
+            avg_price = record['avg_price']
+            item_count = int(record.get('item_count', 0))
+            timestamp_str = record['timestamp']
+            observed_at_utc = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+
             return {
                 'item_id': item_id,
                 'city': location,
@@ -332,9 +307,13 @@ class AODPClient:
                 'item_count': item_count,
                 'observed_at_utc': observed_at_utc
             }
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to process history record: {e}")
+        except (KeyError, TypeError, ValueError) as e:
+            self.logger.debug(
+                "Skip malformed history record (%s): %s | rec=%r",
+                type(e).__name__,
+                e,
+                record,
+            )
             return None
     
     def test_connection(self) -> bool:
