@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QSize
-from PySide6.QtGui import QIcon
-from services.item_icons import ItemIconProvider
+from PySide6.QtGui import QIcon, QPixmap
+from services.item_icons import fetch_icon_bytes
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QLabel, QPushButton,
     QTableView, QFileDialog, QSpinBox
@@ -25,14 +25,11 @@ DEFAULT_CITIES = ["All Cities","Bridgewatch","Caerleon","Fort Sterling","Lymhurs
 QUALS = ["All","1","2","3","4","5"]
 
 
-ICON_SIZE = 24
-
-
 class ItemsModel(QAbstractTableModel):
-    def __init__(self, cache_dir: str, rows: list[dict] | None = None):
+    def __init__(self, rows: list[dict] | None = None):
         super().__init__()
         self.rows = rows or []
-        self._cache_dir = cache_dir
+        self._icons: dict[tuple[str, int], QIcon] = {}
 
     def rowCount(self, parent=QModelIndex()): return len(self.rows)
     def columnCount(self, parent=QModelIndex()): return len(COLUMNS)
@@ -49,14 +46,20 @@ class ItemsModel(QAbstractTableModel):
                 return f"{val:.1f}"
             return "" if val is None else str(val)
         if role == Qt.DecorationRole and key == "item_id":
-            prov = ItemIconProvider.instance(self._cache_dir)
-            def cb(_pm):
-                topLeft = self.index(idx.row(), 0)
-                self.dataChanged.emit(topLeft, topLeft, [Qt.DecorationRole])
-            pm = prov.get(row.get("item_id"), row.get("quality"), ICON_SIZE, cb)
-            if not pm.isNull():
-                return QIcon(pm)
-            return QIcon()
+            iid = row.get("item_id")
+            qual = int(row.get("quality") or 1)
+            key_ = (iid, qual)
+            icon = self._icons.get(key_)
+            if icon is None:
+                data = fetch_icon_bytes(iid, qual)
+                if data:
+                    pm = QPixmap()
+                    pm.loadFromData(data)
+                    icon = QIcon(pm) if not pm.isNull() else QIcon()
+                else:
+                    icon = QIcon()
+                self._icons[key_] = icon
+            return icon
         if role == Qt.ToolTipRole and key == "updated_dt":
             return fmt_tooltip(row.get("updated_dt"))
         return None
@@ -106,8 +109,7 @@ class ItemsBrowser(QWidget):
 
         # Table
         self.table = QTableView()
-        cache_dir = self.main_window.icon_provider.cache_dir if self.main_window else ""
-        self.model = ItemsModel(cache_dir, [])
+        self.model = ItemsModel([])
         self.table.setModel(self.model)
         self.table.setSortingEnabled(True)
         self.table.setIconSize(QSize(24, 24))

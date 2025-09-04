@@ -6,8 +6,8 @@ import logging
 from typing import Any, Dict, List
 
 from PySide6.QtCore import Qt, QThread, QSize
-
-from services.icons import ICON_PROVIDER
+from PySide6.QtGui import QIcon, QPixmap
+from services.item_icons import fetch_icon_bytes
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -131,10 +131,12 @@ class MarketPricesWidget(QWidget):
             item_item = QTableWidgetItem(item_id)
             self.table.setItem(row_index, 0, item_item)
 
-            def _apply_icon(icon, cell=item_item):
-                cell.setIcon(icon)
-
-            ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
+            data = fetch_icon_bytes(item_id, quality or 1)
+            if data:
+                pm = QPixmap()
+                pm.loadFromData(data)
+                if not pm.isNull():
+                    item_item.setIcon(QIcon(pm))
             route = f"{row.get('buy_city') or '-'} → {row.get('sell_city') or '-'}"
             self.table.setItem(row_index, 1, QTableWidgetItem(route))
             self.table.setItem(row_index, 2, QTableWidgetItem(str(row.get("buy_price_max"))))

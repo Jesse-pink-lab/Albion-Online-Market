@@ -1,14 +1,19 @@
 from pathlib import Path
+
+# Prefer platformdirs but fall back to appdirs or a minimal implementation.
+# Only ImportError is caught so real runtime issues aren't masked.
 try:
-    from platformdirs import user_data_dir, user_log_dir
-except Exception:
+    from platformdirs import user_data_dir, user_log_dir  # preferred
+except ImportError:
     try:
-        from appdirs import user_data_dir, user_log_dir  # type: ignore
-    except Exception:
+        from appdirs import user_data_dir, user_log_dir  # fallback
+    except ImportError:
         import os
-        def user_data_dir(appname, appauthor=None):
+
+        def user_data_dir(appname: str, appauthor: str = "", roaming: bool = True) -> str:
             return os.path.join(os.environ.get("APPDATA", "."), appname)
-        def user_log_dir(appname, appauthor=None):
+
+        def user_log_dir(appname: str, appauthor: str = "", roaming: bool = True) -> str:
             return os.path.join(os.environ.get("APPDATA", "."), appname, "logs")
 
 APP_NAME = "AlbionTradeOptimizer"
