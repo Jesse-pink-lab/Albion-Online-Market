@@ -52,34 +52,50 @@ class FlipFinderWorker(QThread):
     def __init__(self, params: Dict[str, Any]):
         super().__init__()
         self.params = params
+        self.log = logging.getLogger(__name__)
 
     def run(self):
         try:
             self.progress.emit(10, "Preparing data...")
             rows = market_prices.LATEST_ROWS or []
             trimmed = []
+
+            def _num(row, *keys, default=0):
+                for k in keys:
+                    if k in row and row[k] is not None:
+                        try:
+                            return float(row[k])
+                        except Exception:
+                            pass
+                return float(default)
+
             for r in rows:
-                if (r.get("buy_max") or 0) > 0 or (r.get("sell_min") or 0) > 0:
-                    trimmed.append(
-                        {
-                            "item_id": r.get("item_id"),
-                            "city": r.get("city"),
-                            "quality": r.get("quality"),
-                            "buy_price_max": r.get("buy_max"),
-                            "sell_price_min": r.get("sell_min"),
-                            "updated_epoch_hours": r.get("updated_epoch_hours"),
-                            "item_name": r.get("item_name"),
-                        }
-                    )
+                buy_val = _num(r, "buy_price_max", "buy_max", "BuyMax", default=0)
+                sell_val = _num(r, "sell_price_min", "sell_min", "SellMin", default=0)
+                if buy_val > 0 or sell_val > 0:
+                    row_norm = dict(r)
+                    row_norm["buy_price_max"] = buy_val
+                    row_norm["sell_price_min"] = sell_val
+                    row_norm["buy"] = buy_val
+                    row_norm["sell"] = sell_val
+                    trimmed.append(row_norm)
+
+            self.log.debug(
+                "FlipFinder trimmed rows: %s (examples: %s)",
+                len(trimmed),
+                trimmed[:2],
+            )
             self.progress.emit(50, "Computing...")
             src_cities = set(self.params.get("src_cities") or self.params.get("cities") or [])
             dst_cities = set(self.params.get("dst_cities") or self.params.get("cities") or [])
             parsed_items = self.params.get("items")
             ui_min_profit = int(self.params.get("min_profit", 0))
-            ui_min_roi = float(self.params.get("min_roi", 0.0))
+            ui_min_roi_pct = float(self.params.get("min_roi", 0.0))
+            min_roi_decimal = ui_min_roi_pct / 100.0
+            self.log.debug("UI ROI percent=%s -> decimal=%s", ui_min_roi_pct, min_roi_decimal)
             ui_max_age = int(self.params.get("max_age_hours", 24))
             tiers = [
-                {"tag": "strict", "min_profit": ui_min_profit, "min_roi": ui_min_roi, "max_age": ui_max_age, "items": parsed_items},
+                {"tag": "strict", "min_profit": ui_min_profit, "min_roi": min_roi_decimal, "max_age": ui_max_age, "items": parsed_items},
                 {"tag": "relaxed-1", "min_profit": 1, "min_roi": 0.10, "max_age": max(ui_max_age, 168), "items": parsed_items},
                 {"tag": "relaxed-2", "min_profit": 1, "min_roi": 0.10, "max_age": max(ui_max_age, 168), "items": None},
                 {"tag": "relaxed-3", "min_profit": 1, "min_roi": 0.01, "max_age": max(ui_max_age, 336), "items": None},
@@ -110,7 +126,7 @@ class FlipFinderWorker(QThread):
             self.progress.emit(100, "Done")
             self.finished.emit({"flips": flips, "tag": tag, "stats": stats, "all_stats": all_stats})
         except Exception as e:
-            log.exception("Flip search failed: %r", e)
+            self.log.exception("Flip search failed: %r", e)
             self.error.emit(str(e))
 
 
@@ -458,9 +474,10 @@ class FlipFinderWidget(QWidget):
         self.results_table.setRowCount(len(flips))
 
         for row, flip in enumerate(flips):
-            item_id = flip.get("item") or flip.get("item_id", "")
+            item_id = flip.get("item_id") or flip.get("item") or ""
             quality = flip.get("quality")
-            item_cell = QTableWidgetItem(item_id)
+            item_text = flip.get("item_name") or item_id or "—"
+            item_cell = QTableWidgetItem(item_text)
             item_cell.setData(Qt.UserRole, flip)
             self.results_table.setItem(row, 0, item_cell)
 
@@ -469,7 +486,9 @@ class FlipFinderWidget(QWidget):
 
             ICON_PROVIDER.get_icon_async(item_id, quality, _apply_icon)
 
-            route_item = QTableWidgetItem(f"{flip['buy_city']} → {flip['sell_city']}")
+            route_str = f"{flip['buy_city']} → {flip['sell_city']}"
+            flip.setdefault("route", route_str)
+            route_item = QTableWidgetItem(route_str)
             self.results_table.setItem(row, 1, route_item)
 
             buy_item = QTableWidgetItem(f"{flip['buy']:,}")
@@ -513,16 +532,20 @@ class FlipFinderWidget(QWidget):
 
     def show_opportunity_details(self, flip: Dict[str, Any]):
         """Show detailed information about a flip."""
-        details = (
-            f"Item: {flip['item']}\n"
-            f"Route: {flip['buy_city']} → {flip['sell_city']}\n"
-            f"Buy: {flip['buy']}\n"
-            f"Sell: {flip['sell']}\n"
-            f"Profit: {flip['spread']}\n"
-            f"ROI: {flip['roi_pct']:.1f}%\n"
-            f"Updated: {flip.get('updated') or ''}"
+        item_name = flip.get("item_name") or flip.get("item_id") or str(flip.get("item", "N/A"))
+        buy = flip.get("buy", 0)
+        sell = flip.get("sell", 0)
+        spread = flip.get("spread", sell - buy)
+        roi = flip.get("roi", 0)
+        route = flip.get("route") or f"{flip.get('buy_city', '')} → {flip.get('sell_city', '')}"
+        updated = flip.get("updated_ago") or flip.get("updated") or ""
+        self.details_text.setPlainText(
+            f"Item: {item_name}\n"
+            f"Route: {route}\n"
+            f"Buy: {int(buy):,}\nSell: {int(sell):,}\n"
+            f"Profit: {int(spread):,}\nROI: {roi*100:.2f}%\n"
+            f"Updated: {updated}"
         )
-        self.details_text.setPlainText(details)
     
     def clear_results(self):
         """Clear search results."""
