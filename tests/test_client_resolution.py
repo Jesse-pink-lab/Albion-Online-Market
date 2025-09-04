@@ -98,12 +98,9 @@ def test_download_called(monkeypatch, tmp_path):
 
     called = {}
 
-    def fake_fetch(dest, prefer_installer=False):
+    def fake_fetch():
         called["yes"] = True
-        dest_path = Path(dest)
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        dest_path.write_text("x")
-        return str(dest_path)
+        return b"x"
 
     monkeypatch.setattr(albion_client, "fetch_latest_windows_client", fake_fetch)
 

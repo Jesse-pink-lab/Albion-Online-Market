@@ -11,8 +11,12 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Set, Optional
+import logging
 
 from utils.catalog_provider import read_master_catalog
+
+
+log = logging.getLogger(__name__)
 
 CATALOG_FILE = Path(__file__).resolve().parents[1] / "recipes" / "items.txt"
 
@@ -26,18 +30,18 @@ def load_catalog() -> List[str]:
 
     try:
         return list(read_master_catalog())
-    except Exception:
-        # Fallback to tiny embedded list if master catalogue isn't available.
-        items: List[str] = []
-        try:
-            with CATALOG_FILE.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        items.append(line)
-        except FileNotFoundError:  # pragma: no cover - defensive
-            pass
-        return items
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        log.warning("Catalog file not readable (%s), using embedded fallback", e)
+    items: List[str] = []
+    try:
+        with CATALOG_FILE.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    items.append(line)
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        log.warning("Embedded catalog file not readable: %s", e)
+    return items
 
 def parse_items(raw: str | None) -> List[str]:
     """Parse comma separated ``raw`` string into UPPERCASE item codes."""

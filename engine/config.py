@@ -13,45 +13,55 @@ import yaml
 from utils.paths import CONFIG_PATH, DB_PATH, LOG_DIR
 
 
+log = logging.getLogger(__name__)
+
+
+class ConfigError(RuntimeError):
+    """Configuration load/save failed due to invalid content or unrecoverable IO error."""
+    pass
+
+
 class ConfigManager:
     """Manages application configuration."""
     
     def __init__(self, config_path: Optional[str] = None):
         """Initialize configuration manager."""
         self.logger = logging.getLogger(__name__)
-        
+
         if config_path:
             self.config_path = Path(config_path)
         else:
             self.config_path = CONFIG_PATH
-        
+
         self._config = None
-    
+
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from YAML file."""
-        try:
-            if not self.config_path.exists():
-                self.logger.warning(f"Config file not found at {self.config_path}, using defaults")
-                self._config = self.get_default_config()
-                return self._config
-            
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
-            # Merge with defaults to ensure all required keys exist
-            default_config = self.get_default_config()
-            merged_config = self._merge_configs(default_config, config)
-            merged_config = self._migrate_config(merged_config)
-
-            self._config = merged_config
-            self.logger.info(f"Configuration loaded from {self.config_path}")
-            
+        cfg_path = self.config_path
+        if not cfg_path.exists():
+            log.info("Config file not found at %s; using defaults.", cfg_path)
+            self._config = self.get_default_config()
             return self._config
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load configuration: {e}")
-            self.logger.info("Using default configuration")
-            return self.get_default_config()
+
+        try:
+            with cfg_path.open("r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh) or {}
+        except PermissionError as e:
+            log.error("No permission to read config: %s", cfg_path)
+            raise ConfigError(str(e)) from e
+        except yaml.YAMLError as e:
+            log.error("Invalid YAML in %s: %s", cfg_path, e)
+            raise ConfigError(f"Invalid YAML: {e}") from e
+        except OSError as e:
+            log.error("Failed to read config %s: %s", cfg_path, e)
+            raise ConfigError(str(e)) from e
+
+        default_config = self.get_default_config()
+        merged_config = self._merge_configs(default_config, data)
+        merged_config = self._migrate_config(merged_config)
+        self._config = merged_config
+        log.info("Configuration loaded from %s", cfg_path)
+        return self._config
     
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration, loading if necessary."""
@@ -95,26 +105,23 @@ class ConfigManager:
         """Save configuration to YAML file."""
         if config is not None:
             self._config = config
-        
+
         if not self._config:
             self.logger.warning("No configuration to save")
             return
-        
-        save_path = Path(config_path) if config_path else self.config_path
-        
+
+        cfg_path = Path(config_path) if config_path else self.config_path
         try:
-            tmp_path = save_path.with_suffix(save_path.suffix + ".tmp")
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                yaml.dump(self._config, f, default_flow_style=False, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, save_path)
-
-            self.logger.info(f"Configuration saved to {save_path}")
-
-        except Exception as e:
-            self.logger.error(f"Failed to save configuration: {e}")
-            raise
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            with cfg_path.open("w", encoding="utf-8") as fh:
+                yaml.safe_dump(self._config, fh, sort_keys=True, allow_unicode=True)
+            log.info("Configuration saved to %s", cfg_path)
+        except PermissionError as e:
+            log.error("No permission to write config: %s", cfg_path)
+            raise ConfigError(str(e)) from e
+        except OSError as e:
+            log.error("Failed to write config %s: %s", cfg_path, e)
+            raise ConfigError(str(e)) from e
     
     def get_default_config(self) -> Dict[str, Any]:
         """Return default configuration values."""

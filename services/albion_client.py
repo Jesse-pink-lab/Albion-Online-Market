@@ -87,10 +87,15 @@ def find_client(
 
     if ask_download and ask_download():
         try:
-            fetch_latest_windows_client(str(MANAGED_CLIENT), prefer_installer=False)
-            valid, _ = _log_candidate(MANAGED_CLIENT)
-            if valid:
-                return str(MANAGED_CLIENT)
+            data = fetch_latest_windows_client()
+            if data:
+                MANAGED_CLIENT.parent.mkdir(parents=True, exist_ok=True)
+                MANAGED_CLIENT.write_bytes(data)
+                valid, _ = _log_candidate(MANAGED_CLIENT)
+                if valid:
+                    return str(MANAGED_CLIENT)
+            else:
+                log.error("Download returned no data")
         except Exception as exc:  # pragma: no cover - network issues
             log.error("Download failed: %s", exc)
     return None

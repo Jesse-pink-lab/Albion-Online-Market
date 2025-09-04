@@ -3,7 +3,7 @@ import sys, pathlib
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
-from utils.timefmt import to_utc, rel_age, fmt_tooltip
+from utils.timefmt import to_utc, rel_age, fmt_tooltip, _to_dt
 
 
 def test_to_utc_parses_strings():
@@ -22,3 +22,10 @@ def test_rel_age_and_tooltip_accept_str():
     iso = "2024-01-02T03:04:05Z"
     assert fmt_tooltip(iso) == "2024-01-02 03:04:05Z"
     assert isinstance(rel_age(iso), str)
+
+
+def test__to_dt_variants():
+    assert _to_dt("2024-01-01T00:00:00Z")
+    assert _to_dt(1700000000) == datetime.fromtimestamp(1700000000, tz=timezone.utc)
+    assert _to_dt("bad") is None
+    assert _to_dt(1e300) is None
