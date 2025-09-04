@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -85,7 +86,7 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
         _on_result(getattr(resp, "status_code", 200))
         resp.raise_for_status()
         release = resp.json()
-    except Exception as exc:
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as exc:
         log.exception("Failed to query GitHub releases: %s", exc)
         raise FetchError("Failed to query GitHub releases") from exc
 
@@ -103,7 +104,7 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
         _on_result(getattr(dl_resp, "status_code", 200))
         dl_resp.raise_for_status()
         data = dl_resp.content
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         log.exception("Failed to download asset: %s", exc)
         raise FetchError("Failed to download Albion Data Client") from exc
 
@@ -117,7 +118,7 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
         log.info("Running installer %s", installer_path)
         try:
             subprocess.run([str(installer_path), "/S"], check=True)
-        except Exception as exc:
+        except subprocess.CalledProcessError as exc:
             log.warning("Silent installer run failed: %s", exc)
             if prefer_installer:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -126,7 +127,7 @@ def fetch_latest_windows_client(dest_exe_path: str, prefer_installer: bool = Fal
             raise FetchError("Failed to execute installer") from exc
         try:
             shutil.copy2(DEFAULT_PROG_FILES, dest)
-        except Exception as exc:
+        except OSError as exc:
             log.exception("Installer did not produce expected exe: %s", exc)
             raise FetchError("Installer did not produce expected exe") from exc
         finally:
