@@ -6,7 +6,7 @@ from collections import defaultdict
 import logging
 import time
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 from utils.constants import MAX_DATA_AGE_HOURS
 
@@ -71,7 +71,7 @@ def build_flips(
                 best_sell[key][city] = sell
                 updated[key][city] = upd
 
-    dedupe: Dict[Tuple[str, int, str, str], dict] = {}
+    dedupe: Dict[tuple[str, int, str, str], dict] = {}
     for (item, quality), buys in best_buy.items():
         sells = best_sell.get((item, quality), {})
         for src in src_set:

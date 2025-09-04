@@ -6,11 +6,12 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 flip_finder = pytest.importorskip("gui.widgets.flip_finder")
 FlipFinderWorker = flip_finder.FlipFinderWorker
-from services import market_prices
+from services.market_prices import STORE
 
 
 def test_trimmed_rows_and_roi_conversion(monkeypatch):
-    market_prices.LATEST_ROWS = [
+    STORE.clear()
+    STORE._latest_rows = [
         {
             "item_id": "T4_SWORD",
             "city": "Martlock",

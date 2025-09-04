@@ -24,13 +24,7 @@ from PySide6.QtGui import QIcon
 from gui.main_window import MainWindow
 from store.db import DatabaseManager
 from engine.config import ConfigManager
-
-
-def setup_data_directory() -> Path:
-    """Ensure the application data directory exists."""
-    data_dir = Path("data")
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir
+from utils.paths import init_app_paths
 
 
 def main() -> int:
@@ -41,12 +35,11 @@ def main() -> int:
     app.setOrganizationName("Manus AI")
 
     try:
+        init_app_paths()
         config_manager = ConfigManager()
         config = config_manager.load_config()
 
         log.info("Starting Albion Trade Optimizer")
-
-        setup_data_directory()
 
         db_manager = DatabaseManager(config)
         db_manager.initialize_database()

@@ -10,15 +10,18 @@ class TokenBucket:
         self.lock = threading.Lock()
 
     def acquire(self, tokens: float = 1.0):
-        with self.lock:
-            now = time.monotonic()
-            self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate)
-            self.last = now
-            need = tokens - self.tokens
-            if need > 0:
-                time.sleep(need / self.rate)
-                self.tokens = 0
-            else:
-                self.tokens -= tokens
+        while True:
+            sleep_for = 0.0
+            with self.lock:
+                now = time.monotonic()
+                self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate)
+                self.last = now
+                if self.tokens >= tokens:
+                    self.tokens -= tokens
+                    return
+                need = tokens - self.tokens
+                sleep_for = need / self.rate if self.rate > 0 else 0.05
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
 bucket = TokenBucket(rate_per_sec=2.0, capacity=4)

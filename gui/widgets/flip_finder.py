@@ -25,7 +25,7 @@ import pandas as pd
 from datetime import datetime
 
 from services.flip_engine import build_flips
-from services import market_prices
+from services.market_prices import STORE
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class FlipFinderWorker(QThread):
     def run(self):
         try:
             self.progress.emit(10, "Preparing data...")
-            rows = market_prices.LATEST_ROWS or []
+            rows = STORE.latest_rows()
             trimmed = []
 
             def _num(row, *keys, default=0):

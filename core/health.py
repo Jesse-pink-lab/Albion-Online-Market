@@ -1,5 +1,6 @@
 import logging
 import requests
+from requests import exceptions as rqexc
 from datasources.http import get_shared_session
 from datasources.aodp_url import base_for, build_prices_request
 from core.signals import signals
@@ -34,14 +35,18 @@ def ping_aodp(server: str):
         r = sess.get(url, params=params, timeout=(3, 5))
         code = r.status_code
         _on_result(code)
-        if code == 429 or code == 200:
+        if code in (429, 200):
             _ = r.json() if code == 200 else None
             store._fails = 0
             store.set_online(True)
             return True
         store._fails += 1
-    except Exception:
+    except (rqexc.Timeout, rqexc.ConnectionError, rqexc.HTTPError) as e:
         store._fails += 1
+        log.warning("AODP ping failed (%s): %s", type(e).__name__, e)
+        if store._fails >= 3:
+            store.set_online(False)
+        return False
     if store._fails >= 3:
         store.set_online(False)
     return store.aodp_online
