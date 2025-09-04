@@ -294,11 +294,12 @@ def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
 
         sell_dt = ts(row.get("sell_price_min_date"))
         buy_dt = ts(row.get("buy_price_max_date"))
+        from datetime import datetime, timezone
         updated_dt = max(
             [d for d in (sell_dt, buy_dt) if d is not None],
-            default=None,
+            default=datetime.now(timezone.utc),
         )
-        if cutoff and (updated_dt is None or updated_dt < cutoff):
+        if cutoff and updated_dt < cutoff:
             continue
 
         prev = out.get(key)
@@ -336,6 +337,12 @@ def normalize_and_dedupe(rows: List[Dict]) -> List[Dict]:
                 "updated_human": rel_age(udt) if udt else "",
             }
         )
+        if udt:
+            rec["updated_iso"] = udt.isoformat()
+            rec["updated_epoch_hours"] = udt.timestamp() / 3600.0
+        else:
+            rec["updated_iso"] = None
+            rec["updated_epoch_hours"] = 0.0
         normalized.append(rec)
 
     return normalized

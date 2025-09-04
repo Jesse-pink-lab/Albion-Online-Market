@@ -19,10 +19,12 @@ from PySide6.QtGui import QFont
 
 from services.icons import ICON_PROVIDER
 from utils.timefmt import rel_age
+from utils.items import parse_item_input
+from utils.params import parse_quality_input, parse_city_selection
 import pandas as pd
 from datetime import datetime
 
-from services.flip_engine import compute_flips
+from services.flip_engine import build_flips
 from services import market_prices
 
 log = logging.getLogger(__name__)
@@ -43,7 +45,7 @@ class SortableTableWidgetItem(QTableWidgetItem):
 class FlipFinderWorker(QThread):
     """Background worker for computing flip opportunities."""
 
-    finished = Signal(list)
+    finished = Signal(dict)
     error = Signal(str)
     progress = Signal(int, str)
 
@@ -55,43 +57,58 @@ class FlipFinderWorker(QThread):
         try:
             self.progress.emit(10, "Preparing data...")
             rows = market_prices.LATEST_ROWS or []
-            trimmed = [
-                {
-                    "item_id": r.get("item_id"),
-                    "city": r.get("city"),
-                    "quality": r.get("quality"),
-                    "buy_price_max": r.get("buy_max"),
-                    "sell_price_min": r.get("sell_min"),
-                    "updated_dt": r.get("updated_dt"),
-                }
-                for r in rows
-                if (r.get("buy_max") or 0) > 0 or (r.get("sell_min") or 0) > 0
-            ]
+            trimmed = []
+            for r in rows:
+                if (r.get("buy_max") or 0) > 0 or (r.get("sell_min") or 0) > 0:
+                    trimmed.append(
+                        {
+                            "item_id": r.get("item_id"),
+                            "city": r.get("city"),
+                            "quality": r.get("quality"),
+                            "buy_price_max": r.get("buy_max"),
+                            "sell_price_min": r.get("sell_min"),
+                            "updated_epoch_hours": r.get("updated_epoch_hours"),
+                            "item_name": r.get("item_name"),
+                        }
+                    )
             self.progress.emit(50, "Computing...")
-            try:
-                flips = compute_flips(
-                    trimmed,
-                    cities=self.params.get("cities"),
+            src_cities = set(self.params.get("src_cities") or self.params.get("cities") or [])
+            dst_cities = set(self.params.get("dst_cities") or self.params.get("cities") or [])
+            parsed_items = self.params.get("items")
+            ui_min_profit = int(self.params.get("min_profit", 0))
+            ui_min_roi = float(self.params.get("min_roi", 0.0))
+            ui_max_age = int(self.params.get("max_age_hours", 24))
+            tiers = [
+                {"tag": "strict", "min_profit": ui_min_profit, "min_roi": ui_min_roi, "max_age": ui_max_age, "items": parsed_items},
+                {"tag": "relaxed-1", "min_profit": 1, "min_roi": 0.10, "max_age": max(ui_max_age, 168), "items": parsed_items},
+                {"tag": "relaxed-2", "min_profit": 1, "min_roi": 0.10, "max_age": max(ui_max_age, 168), "items": None},
+                {"tag": "relaxed-3", "min_profit": 1, "min_roi": 0.01, "max_age": max(ui_max_age, 336), "items": None},
+            ]
+
+            flips = []
+            tag = tiers[-1]["tag"]
+            all_stats = []
+            stats = {}
+            for tier in tiers:
+                flips, stats = build_flips(
+                    rows=trimmed,
+                    items_filter=tier["items"],
+                    src_cities=src_cities,
+                    dst_cities=dst_cities,
                     qualities=self.params.get("qualities"),
-                    min_profit=self.params.get("min_profit", 0),
-                    min_roi=self.params.get("min_roi", 0.0),
+                    min_profit=tier["min_profit"],
+                    min_roi=tier["min_roi"],
+                    max_age_hours=tier["max_age"],
                     max_results=self.params.get("max_results", 100),
-                    max_age_hours=self.params.get("max_age_hours", 24),
                 )
-            except Exception as e:
-                log.warning("Vectorized flip search failed: %r; retrying in pure-Python", e)
-                from services.flip_engine import compute_flips_py
-                flips = compute_flips_py(
-                    trimmed,
-                    cities=self.params.get("cities"),
-                    qualities=self.params.get("qualities"),
-                    min_profit=self.params.get("min_profit", 0),
-                    min_roi=self.params.get("min_roi", 0.0),
-                    max_results=self.params.get("max_results", 100),
-                    max_age_hours=self.params.get("max_age_hours", 24),
-                )
+                if flips:
+                    tag = tier["tag"]
+                    all_stats.append((tier["tag"], stats, len(flips)))
+                    break
+                all_stats.append((tier["tag"], stats, 0))
+
             self.progress.emit(100, "Done")
-            self.finished.emit(flips)
+            self.finished.emit({"flips": flips, "tag": tag, "stats": stats, "all_stats": all_stats})
         except Exception as e:
             log.exception("Flip search failed: %r", e)
             self.error.emit(str(e))
@@ -382,27 +399,21 @@ class FlipFinderWidget(QWidget):
         """Get search parameters from UI."""
         params = {}
 
-        # Cities
+        # Items
+        params['items'] = parse_item_input(self.items_edit.text())
+
+        # Cities - same set for src and dst
         cities_selection = self.cities_combo.currentText()
-        if cities_selection == "Royal Cities Only":
-            params['cities'] = ['Martlock', 'Lymhurst', 'Bridgewatch', 'Fort Sterling', 'Thetford']
-        elif cities_selection == "Black Market Only":
-            params['cities'] = ['Caerleon']
-        elif cities_selection == "Custom":
-            # For now, use all cities
-            params['cities'] = ['Martlock', 'Lymhurst', 'Bridgewatch', 'Fort Sterling', 'Thetford', 'Caerleon']
-        else:  # All Cities
-            params['cities'] = ['Martlock', 'Lymhurst', 'Bridgewatch', 'Fort Sterling', 'Thetford', 'Caerleon']
-        
+        all_cities = ["Martlock", "Lymhurst", "Bridgewatch", "Fort Sterling", "Thetford", "Caerleon"]
+        cities_set = parse_city_selection(cities_selection, all_cities)
+        params['cities'] = list(cities_set)
+        params['src_cities'] = list(cities_set)
+        params['dst_cities'] = list(cities_set)
+
         # Quality
         quality_text = self.quality_combo.currentText()
-        if "All" in quality_text:
-            params['qualities'] = [1, 2, 3, 4, 5]
-        else:
-            # Extract quality number from text like "Normal (1)"
-            quality_num = int(quality_text.split('(')[1].split(')')[0])
-            params['qualities'] = [quality_num]
-        
+        params['qualities'] = parse_quality_input(quality_text)
+
         # Filters
         params['min_profit'] = self.min_profit_spin.value()
         params['min_roi'] = self.min_roi_spin.value()
@@ -411,8 +422,9 @@ class FlipFinderWidget(QWidget):
 
         return params
     
-    def on_flips_found(self, flips: List[Dict[str, Any]]):
+    def on_flips_found(self, payload: Dict[str, Any]):
         """Handle search results."""
+        flips = payload.get("flips", [])
         self.current_flips = flips
         self.populate_results_table(flips)
 
@@ -449,6 +461,7 @@ class FlipFinderWidget(QWidget):
             item_id = flip.get("item") or flip.get("item_id", "")
             quality = flip.get("quality")
             item_cell = QTableWidgetItem(item_id)
+            item_cell.setData(Qt.UserRole, flip)
             self.results_table.setItem(row, 0, item_cell)
 
             def _apply_icon(icon, cell=item_cell):
@@ -460,19 +473,19 @@ class FlipFinderWidget(QWidget):
             self.results_table.setItem(row, 1, route_item)
 
             buy_item = QTableWidgetItem(f"{flip['buy']:,}")
-            buy_item.setData(Qt.UserRole, flip['buy'])
+            buy_item.setData(Qt.EditRole, flip['buy'])
             self.results_table.setItem(row, 2, buy_item)
 
             sell_item = QTableWidgetItem(f"{flip['sell']:,}")
-            sell_item.setData(Qt.UserRole, flip['sell'])
+            sell_item.setData(Qt.EditRole, flip['sell'])
             self.results_table.setItem(row, 3, sell_item)
 
             spread_item = QTableWidgetItem(f"{flip['spread']:,}")
-            spread_item.setData(Qt.UserRole, flip['spread'])
+            spread_item.setData(Qt.EditRole, flip['spread'])
             self.results_table.setItem(row, 4, spread_item)
 
             roi_item = QTableWidgetItem(f"{flip['roi_pct']:.1f}%")
-            roi_item.setData(Qt.UserRole, flip['roi_pct'])
+            roi_item.setData(Qt.EditRole, flip['roi_pct'])
             self.results_table.setItem(row, 5, roi_item)
 
             udisp = flip.get("updated") or ""
