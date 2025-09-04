@@ -73,24 +73,72 @@ class AODPClient:
         self.request_count += 1
     
     def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Make a request to the AODP API with error handling."""
-        self._enforce_rate_limit()
-        try:
-            self.logger.debug(f"Making request to {url} with params {params}")
-            bucket.acquire()
-            response = self.session.get(url, params=params, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            self.logger.debug(
-                f"Received {len(data) if isinstance(data, list) else 1} records"
-            )
-            return data
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Request failed: {e}")
-            raise AODPAPIError(f"API request failed: {e}")
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse JSON response: {e}")
-            raise AODPAPIError(f"Invalid JSON response: {e}")
+        """Make a request to the AODP API with retry and error handling."""
+
+        retry_statuses = {429, 500, 502, 503, 504}
+        max_retries = 3
+        backoff = 1
+
+        for attempt in range(1, max_retries + 1):
+            self._enforce_rate_limit()
+            try:
+                self.logger.debug(f"Making request to {url} with params {params}")
+                bucket.acquire()
+                response = self.session.get(url, params=params, timeout=self.timeout)
+
+                if response.status_code in retry_statuses:
+                    if attempt < max_retries:
+                        self.logger.warning(
+                            "Request to %s failed with status %s. "
+                            "Retrying in %s seconds (attempt %s/%s)",
+                            url,
+                            response.status_code,
+                            backoff,
+                            attempt,
+                            max_retries,
+                        )
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+
+                    self.logger.error(
+                        "Request to %s failed with status %s after %s attempts",
+                        url,
+                        response.status_code,
+                        max_retries,
+                    )
+                    raise AODPAPIError(
+                        f"API request failed with status code {response.status_code}"
+                    )
+
+                response.raise_for_status()
+                data = response.json()
+                self.logger.debug(
+                    f"Received {len(data) if isinstance(data, list) else 1} records"
+                )
+                return data
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries:
+                    self.logger.warning(
+                        "Request to %s raised %s. Retrying in %s seconds (attempt %s/%s)",
+                        url,
+                        e,
+                        backoff,
+                        attempt,
+                        max_retries,
+                    )
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
+                self.logger.error(f"Request failed: {e}")
+                raise AODPAPIError(f"API request failed: {e}")
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Failed to parse JSON response: {e}")
+                raise AODPAPIError(f"Invalid JSON response: {e}")
+
+        # If we somehow exit the loop without returning or raising, raise an error
+        raise AODPAPIError("API request failed after retries")
     
     def get_current_prices(
         self,
